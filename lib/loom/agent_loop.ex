@@ -219,7 +219,7 @@ defmodule Loom.AgentLoop do
 
     context = %{project_path: config.project_path, session_id: config.session_id, agent_name: config.agent_name, team_id: config.team_id}
 
-    emit(config, :tool_executing, %{tool_name: tool_name})
+    emit(config, :tool_executing, %{tool_name: tool_name, tool_target: tool_path})
 
     case Jido.AI.ToolAdapter.lookup_action(tool_name, config.tools) do
       {:error, :not_found} ->

@@ -200,6 +200,11 @@ defmodule LoomWeb.WorkspaceLive do
     {:noreply, assign(socket, status: status)}
   end
 
+  def handle_info({:tool_executing, _source, %{tool_name: name, tool_target: target}}, socket) do
+    display = if target && target != "*", do: "#{name}: #{target}", else: name
+    {:noreply, assign(socket, current_tool: display, current_tool_name: name)}
+  end
+
   def handle_info({:tool_executing, _source, %{tool_name: name}}, socket) do
     {:noreply, assign(socket, current_tool: name, current_tool_name: name)}
   end
@@ -208,6 +213,12 @@ defmodule LoomWeb.WorkspaceLive do
     {:noreply, assign(socket, current_tool: tool_name, current_tool_name: tool_name)}
   end
 
+  # Team agent tool_complete (3-element tuple)
+  def handle_info({:tool_complete, _agent_name, %{tool_name: _name}}, socket) do
+    {:noreply, assign(socket, current_tool: nil)}
+  end
+
+  # Session tool_complete (4-element tuple with result)
   def handle_info({:tool_complete, _session_id, tool_name, result}, socket) do
     socket = assign(socket, current_tool: nil)
 
