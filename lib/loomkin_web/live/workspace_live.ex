@@ -839,6 +839,11 @@ defmodule LoomkinWeb.WorkspaceLive do
     {:noreply, forward_to_activity(socket, event)}
   end
 
+  def handle_info({:task_created, _task_id, _title} = event, socket) do
+    forward_to_dashboard(socket)
+    {:noreply, forward_to_activity(socket, event)}
+  end
+
   def handle_info({:task_assigned, _task_id, _agent_name} = event, socket) do
     forward_to_dashboard(socket)
     {:noreply, forward_to_activity(socket, event)}
@@ -2005,6 +2010,18 @@ defmodule LoomkinWeb.WorkspaceLive do
   defp activity_event_from({:agent_stream_end, _agent, _payload}), do: nil
 
   # --- Task lifecycle: human-readable content ---
+
+  defp activity_event_from({:task_created, _task_id, title}) do
+    %{
+      id: Ecto.UUID.generate(),
+      type: :task_created,
+      agent: "system",
+      content: "New task created",
+      timestamp: DateTime.utc_now(),
+      expanded: false,
+      metadata: %{title: title}
+    }
+  end
 
   defp activity_event_from({:task_assigned, _task_id, agent}) do
     %{

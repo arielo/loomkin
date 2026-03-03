@@ -109,6 +109,17 @@ defmodule LoomkinWeb.TeamActivityComponentTest do
       assert html =~ "Reply to coder"
     end
 
+    test "task_created card hides reply button for system agent" do
+      html = render_with_events([make_event(:task_created, "system", %{metadata: %{title: "Implement feature"}})])
+      refute html =~ "Reply to system"
+    end
+
+    test "task_created card renders title and created label" do
+      html = render_with_events([make_event(:task_created, "system", %{metadata: %{title: "Implement feature"}})])
+      assert html =~ "created"
+      assert html =~ "Implement feature"
+    end
+
     test "task_complete card shows reply button" do
       html = render_with_events([make_event(:task_complete, "coder", %{metadata: %{title: "Fix bug"}})])
       assert html =~ "Reply to coder"
