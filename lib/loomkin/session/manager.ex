@@ -37,9 +37,9 @@ defmodule Loomkin.Session.Manager do
       {:error, {:already_started, pid}} ->
         # Ensure secondary callers also get team wiring by re-broadcasting
         # the team_id if the session already has one.
-        spawn(fn ->
+        Task.start(fn ->
           try do
-            case GenServer.call(pid, :get_team_id, 5_000) do
+            case Session.get_team_id(pid) do
               nil -> :ok
               team_id -> broadcast(session_id, {:team_available, session_id, team_id})
             end
@@ -47,6 +47,7 @@ defmodule Loomkin.Session.Manager do
             _, _ -> :ok
           end
         end)
+
         {:ok, pid}
 
       {:error, reason} ->
@@ -63,41 +64,99 @@ defmodule Loomkin.Session.Manager do
     tools ++ missing
   end
 
-  # Create a backing team with a lead agent for this session.
+  @doc "Find an agent by name within a team."
+  @spec find_agent(String.t(), String.t()) :: {:ok, pid()} | :error
+  def find_agent(team_id, agent_name) do
+    case Registry.lookup(Loomkin.Teams.AgentRegistry, {team_id, agent_name}) do
+      [{pid, _}] -> {:ok, pid}
+      [] -> :error
+    end
+  end
+
+  # Create a backing team with bootstrap agents (Concierge + Orienter) for this session.
   # This is best-effort — if it fails, the session still works without teams.
   defp maybe_create_backing_team(session_id, opts) do
     project_path = Keyword.get(opts, :project_path)
     model = Keyword.get(opts, :model)
+    fast_model = Keyword.get(opts, :fast_model) || model
 
-    Logger.debug("[Session.Manager] maybe_create_backing_team session=#{session_id} model=#{inspect(model)}")
+    Logger.debug(
+      "[Session.Manager] maybe_create_backing_team session=#{session_id} model=#{inspect(model)}"
+    )
 
-    Task.start(fn ->
-      try do
-        {:ok, team_id} = Loomkin.Teams.Manager.create_team(name: "session-#{String.slice(session_id, 0, 8)}", project_path: project_path)
-        Logger.info("[Session.Manager] Team created team_id=#{team_id} for session=#{session_id}")
+    try do
+      {:ok, team_id} =
+        Loomkin.Teams.Manager.create_team(
+          name: "session-#{String.slice(session_id, 0, 8)}",
+          project_path: project_path
+        )
 
-        # Spawn the lead agent so the team actually has a member
-        case Loomkin.Teams.Manager.spawn_agent(team_id, "lead", :lead, model: model, project_path: project_path) do
-          {:ok, pid} ->
-            Logger.info("[Session.Manager] Lead agent spawned pid=#{inspect(pid)} team=#{team_id}")
+      Logger.info("[Session.Manager] Team created team_id=#{team_id} for session=#{session_id}")
+
+      # Spawn Concierge (thinking model) — the primary user-facing agent
+      case Loomkin.Teams.Manager.spawn_agent(team_id, "concierge", :concierge,
+             model: model,
+             project_path: project_path
+           ) do
+        {:ok, pid} ->
+          Logger.info("[Session.Manager] Concierge spawned pid=#{inspect(pid)} team=#{team_id}")
+
+        {:error, reason} ->
+          Logger.warning(
+            "[Session.Manager] Concierge FAILED team=#{team_id}: #{inspect(reason)}"
+          )
+      end
+
+      # Spawn Orienter (fast model) — silent background scanner
+      case Loomkin.Teams.Manager.spawn_agent(team_id, "orienter", :orienter,
+             model: fast_model,
+             project_path: project_path
+           ) do
+        {:ok, pid} ->
+          Logger.info("[Session.Manager] Orienter spawned pid=#{inspect(pid)} team=#{team_id}")
+
+        {:error, reason} ->
+          Logger.warning(
+            "[Session.Manager] Orienter FAILED team=#{team_id}: #{inspect(reason)}"
+          )
+      end
+
+      # Persist team_id to the session DB record
+      persist_team_id(session_id, team_id)
+
+      # Notify the session process about its team
+      case Registry.lookup(Loomkin.SessionRegistry, session_id) do
+        [{pid, _}] ->
+          Logger.info("[Session.Manager] Sending :team_created to session pid=#{inspect(pid)}")
+          send(pid, {:team_created, team_id})
+
+        [] ->
+          Logger.error("[Session.Manager] Session NOT FOUND in registry! session=#{session_id}")
+      end
+    rescue
+      e ->
+        Logger.error(
+          "[Session.Manager] Error creating backing team: #{Exception.message(e)}\n#{Exception.format_stacktrace(__STACKTRACE__)}"
+        )
+    end
+  end
+
+  defp persist_team_id(session_id, team_id) do
+    case Loomkin.Session.Persistence.get_session(session_id) do
+      nil ->
+        Logger.warning(
+          "[Session.Manager] Cannot persist team_id — session #{session_id} not found"
+        )
+
+      db_session ->
+        case Loomkin.Session.Persistence.update_session(db_session, %{team_id: team_id}) do
+          {:ok, _} ->
+            :ok
 
           {:error, reason} ->
-            Logger.warning("[Session.Manager] Lead agent FAILED team=#{team_id}: #{inspect(reason)}")
+            Logger.warning("[Session.Manager] Failed to persist team_id: #{inspect(reason)}")
         end
-
-        # Notify the session process about its team
-        case Registry.lookup(Loomkin.SessionRegistry, session_id) do
-          [{pid, _}] ->
-            Logger.info("[Session.Manager] Sending :team_created to session pid=#{inspect(pid)}")
-            send(pid, {:team_created, team_id})
-          [] ->
-            Logger.error("[Session.Manager] Session NOT FOUND in registry! session=#{session_id}")
-        end
-      rescue
-        e ->
-          Logger.error("[Session.Manager] Error creating backing team: #{Exception.message(e)}\n#{Exception.format_stacktrace(__STACKTRACE__)}")
-      end
-    end)
+    end
   end
 
   @doc "Stop a session gracefully, dissolving its backing team."
@@ -108,7 +167,7 @@ defmodule Loomkin.Session.Manager do
         # Retrieve team_id before stopping the session process
         team_id =
           try do
-            GenServer.call(pid, :get_team_id, 5_000)
+            Session.get_team_id(pid)
           catch
             _, _ -> nil
           end
@@ -118,7 +177,10 @@ defmodule Loomkin.Session.Manager do
         # Dissolve the backing team to clean up ETS tables and agent processes
         if team_id do
           Loomkin.Teams.Manager.dissolve_team(team_id)
-          Logger.debug("[Session.Manager] Dissolved backing team #{team_id} for session #{session_id}")
+
+          Logger.debug(
+            "[Session.Manager] Dissolved backing team #{team_id} for session #{session_id}"
+          )
         end
 
         :ok

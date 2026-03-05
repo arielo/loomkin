@@ -2,7 +2,8 @@ defmodule Loomkin.Session.Persistence do
   @moduledoc "Database operations for sessions and messages."
 
   alias Loomkin.Repo
-  alias Loomkin.Schemas.{Session, Message}
+  alias Loomkin.Schemas.Message
+  alias Loomkin.Schemas.Session
   import Ecto.Query
 
   @spec create_session(map()) :: {:ok, Session.t()} | {:error, Ecto.Changeset.t()}
@@ -94,6 +95,15 @@ defmodule Loomkin.Session.Persistence do
       |> Repo.update_all([])
 
     if count > 0, do: :ok, else: {:error, :not_found}
+  end
+
+  @spec find_latest_active_session(String.t()) :: Session.t() | nil
+  def find_latest_active_session(project_path) do
+    Session
+    |> where([s], s.project_path == ^project_path and s.status == :active)
+    |> order_by([s], desc: s.updated_at)
+    |> limit(1)
+    |> Repo.one()
   end
 
   defp maybe_filter_status(query, nil), do: query

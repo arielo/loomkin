@@ -3,13 +3,15 @@ defmodule Loomkin.Session do
 
   use GenServer
 
-  alias Loomkin.Session.{Architect, Persistence}
+  alias Loomkin.Session.Architect
+  alias Loomkin.Session.Persistence
 
   require Logger
 
   defstruct [
     :id,
     :model,
+    :fast_model,
     :project_path,
     :db_session,
     :status,
@@ -76,6 +78,19 @@ defmodule Loomkin.Session do
     end
   end
 
+  @doc "Update the fast model for a running session."
+  @spec update_fast_model(pid() | String.t(), String.t()) :: :ok | {:error, term()}
+  def update_fast_model(pid, model) when is_pid(pid) do
+    GenServer.call(pid, {:update_fast_model, model})
+  end
+
+  def update_fast_model(session_id, model) when is_binary(session_id) do
+    case Loomkin.Session.Manager.find_session(session_id) do
+      {:ok, pid} -> update_fast_model(pid, model)
+      :error -> {:error, :not_found}
+    end
+  end
+
   @doc "Get the current session status."
   @spec get_status(pid() | String.t()) :: {:ok, atom()}
   def get_status(pid) when is_pid(pid) do
@@ -100,6 +115,24 @@ defmodule Loomkin.Session do
       {:ok, pid} -> cancel(pid)
       :error -> {:error, :not_found}
     end
+  end
+
+  @doc "Get the current model for a running session."
+  @spec get_model(pid()) :: String.t()
+  def get_model(pid) when is_pid(pid) do
+    GenServer.call(pid, :get_model, 5_000)
+  end
+
+  @doc "Get the current fast model for a running session."
+  @spec get_fast_model(pid()) :: String.t()
+  def get_fast_model(pid) when is_pid(pid) do
+    GenServer.call(pid, :get_fast_model, 5_000)
+  end
+
+  @doc "Get the team_id for a running session."
+  @spec get_team_id(pid()) :: String.t() | nil
+  def get_team_id(pid) when is_pid(pid) do
+    GenServer.call(pid, :get_team_id, 5_000)
   end
 
   @doc "Update the project path for a running session."
@@ -135,15 +168,19 @@ defmodule Loomkin.Session do
 
     auto_approve = Keyword.get(opts, :auto_approve, false)
 
+    fast_model = Keyword.get(opts, :fast_model)
+
     case load_or_create_session(session_id, model, project_path, title) do
       {:ok, db_session, messages} ->
         # Prefer the DB-persisted model for resumed sessions so the user's
         # last selection survives page refreshes.
         effective_model = db_session.model || model
+        effective_fast_model = db_session.fast_model || fast_model || effective_model
 
         state = %__MODULE__{
           id: db_session.id,
           model: effective_model,
+          fast_model: effective_fast_model,
           project_path: project_path,
           db_session: db_session,
           messages: messages,
@@ -162,15 +199,57 @@ defmodule Loomkin.Session do
   @impl true
   def handle_call({:send_message, text}, from, state) do
     Logger.debug("[Session] send_message session=#{state.id} model=#{state.model}")
-    state = update_status(state, :thinking)
 
-    # Run architect in an async Task so the GenServer stays responsive
-    # for permission responses while the architect is running.
-    task = Task.Supervisor.async_nolink(Loomkin.Teams.TaskSupervisor, fn ->
-      Architect.run(text, state, architect_model: state.model)
-    end)
+    # Try routing to Concierge first (bootstrap agent pattern)
+    case maybe_route_to_concierge(state, text) do
+      {:routed, concierge_pid} ->
+        # Persist and broadcast the user message
+        {:ok, _} =
+          Persistence.save_message(%{session_id: state.id, role: :user, content: text})
 
-    {:noreply, %{state | architect_task: {task, from}}}
+        user_msg = %{role: :user, content: text}
+        state = %{state | messages: state.messages ++ [user_msg]}
+        broadcast(state.id, {:new_message, state.id, user_msg})
+
+        state = update_status(state, :thinking)
+
+        # Run concierge call in an async Task so the Session stays responsive
+        task =
+          Task.Supervisor.async_nolink(Loomkin.Teams.TaskSupervisor, fn ->
+            case Loomkin.Teams.Agent.send_message(concierge_pid, text) do
+              {:ok, response_text} ->
+                # Persist and broadcast the assistant response
+                {:ok, _} =
+                  Persistence.save_message(%{
+                    session_id: state.id,
+                    role: :assistant,
+                    content: response_text
+                  })
+
+                assistant_msg = %{role: :assistant, content: response_text}
+                updated_messages = state.messages ++ [assistant_msg]
+                broadcast(state.id, {:new_message, state.id, assistant_msg})
+                {:ok, response_text, %{state | messages: updated_messages}}
+
+              {:error, reason} ->
+                {:error, reason, state}
+            end
+          end)
+
+        {:noreply, %{state | architect_task: {task, from}}}
+
+      :not_routed ->
+        state = update_status(state, :thinking)
+
+        # Run architect in an async Task so the GenServer stays responsive
+        # for permission responses while the architect is running.
+        task =
+          Task.Supervisor.async_nolink(Loomkin.Teams.TaskSupervisor, fn ->
+            Architect.run(text, state, architect_model: state.model)
+          end)
+
+        {:noreply, %{state | architect_task: {task, from}}}
+    end
   end
 
   @impl true
@@ -182,6 +261,17 @@ defmodule Loomkin.Session do
   def handle_call({:update_model, model}, _from, state) do
     Persistence.update_session(state.db_session, %{model: model})
     {:reply, :ok, %{state | model: model}}
+  end
+
+  @impl true
+  def handle_call({:update_fast_model, model}, _from, state) do
+    Persistence.update_session(state.db_session, %{fast_model: model})
+    {:reply, :ok, %{state | fast_model: model}}
+  end
+
+  @impl true
+  def handle_call(:get_fast_model, _from, state) do
+    {:reply, state.fast_model, state}
   end
 
   @impl true
@@ -202,6 +292,7 @@ defmodule Loomkin.Session do
   @impl true
   def handle_call({:update_project_path, path}, _from, state) do
     Logger.debug("[Session] Updated project_path to #{path}")
+    Persistence.update_session(state.db_session, %{project_path: path})
     {:reply, :ok, %{state | project_path: path}}
   end
 
@@ -226,7 +317,10 @@ defmodule Loomkin.Session do
 
   @impl true
   def handle_info({:team_created, team_id}, state) do
-    Logger.info("[Session] :team_created received team_id=#{team_id} session=#{state.id} — broadcasting :team_available")
+    Logger.info(
+      "[Session] :team_created received team_id=#{team_id} session=#{state.id} — broadcasting :team_available"
+    )
+
     broadcast(state.id, {:team_available, state.id, team_id})
     {:noreply, Map.put(state, :team_id, team_id)}
   end
@@ -306,7 +400,9 @@ defmodule Loomkin.Session do
   @impl true
   def handle_info({:permission_pending, architect_pid, tool_name, tool_path}, state) do
     Logger.debug("[Session] Permission pending: #{tool_name} #{tool_path}")
-    {:noreply, %{state | pending_permission: {architect_pid, %{tool_name: tool_name, tool_path: tool_path}}}}
+
+    {:noreply,
+     %{state | pending_permission: {architect_pid, %{tool_name: tool_name, tool_path: tool_path}}}}
   end
 
   @impl true
@@ -443,7 +539,16 @@ defmodule Loomkin.Session do
   defp broadcast(session_id, event) do
     Phoenix.PubSub.broadcast(Loomkin.PubSub, "session:#{session_id}", event)
   rescue
-    _ -> :ok
+    e -> Logger.warning("[Session] Broadcast failed: #{Exception.message(e)}")
+  end
+
+  defp maybe_route_to_concierge(state, _text) do
+    with team_id when is_binary(team_id) <- state.team_id,
+         {:ok, pid} <- Loomkin.Session.Manager.find_agent(team_id, "concierge") do
+      {:routed, pid}
+    else
+      _ -> :not_routed
+    end
   end
 
   defp format_error(%{reason: reason, status: status}) when is_binary(reason) do
