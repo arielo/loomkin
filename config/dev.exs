@@ -28,6 +28,11 @@ config :loomkin, LoomkinWeb.Endpoint,
 
 config :logger, level: :debug
 
+# anubis_mcp (transitive dep via jido_mcp) logs a spurious warning at startup when no
+# session store adapter is configured, even when the session store is intentionally disabled.
+# Suppress its logging entirely since we don't debug this transitive dependency directly.
+config :anubis_mcp, log: false
+
 # Initialize plugs at runtime for faster development compilation
 config :phoenix, :plug_init_mode, :runtime
 
