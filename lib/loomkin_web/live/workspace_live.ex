@@ -821,7 +821,11 @@ defmodule LoomkinWeb.WorkspaceLive do
     {:noreply, assign(socket, queue_editing_id: nil)}
   end
 
-  def handle_event("save_queued_edit", %{"agent" => agent_name, "message_id" => id, "content" => content}, socket) do
+  def handle_event(
+        "save_queued_edit",
+        %{"agent" => agent_name, "message_id" => id, "content" => content},
+        socket
+      ) do
     team_id = get_in(socket.assigns, [:queue_drawer, :team_id]) || socket.assigns.active_team_id
 
     case Loomkin.Teams.Manager.find_agent(team_id, agent_name) do
@@ -907,7 +911,11 @@ defmodule LoomkinWeb.WorkspaceLive do
     {:noreply, assign(socket, schedule_delay_minutes: String.to_integer(minutes))}
   end
 
-  def handle_event("schedule_message", %{"content" => content, "delay_minutes" => delay} = params, socket) do
+  def handle_event(
+        "schedule_message",
+        %{"content" => content, "delay_minutes" => delay} = params,
+        socket
+      ) do
     target_agent = params["target_agent"]
     delay_minutes = String.to_integer(delay)
     team_id = socket.assigns.active_team_id
@@ -990,7 +998,9 @@ defmodule LoomkinWeb.WorkspaceLive do
               Loomkin.Teams.Agent.inject_guidance(pid, text)
 
             :error ->
-              Logger.warning("[WorkspaceLive] Cannot inject guidance — agent #{agent_name} not found")
+              Logger.warning(
+                "[WorkspaceLive] Cannot inject guidance — agent #{agent_name} not found"
+              )
           end
 
           guidance_event = %{
@@ -2171,7 +2181,9 @@ defmodule LoomkinWeb.WorkspaceLive do
               end)
 
             :error ->
-              Logger.warning("[WorkspaceLive] Scheduled delivery failed — agent #{target} not found")
+              Logger.warning(
+                "[WorkspaceLive] Scheduled delivery failed — agent #{target} not found"
+              )
           end
         else
           Session.send_message(socket.assigns.session_id, content)
@@ -2547,27 +2559,51 @@ defmodule LoomkinWeb.WorkspaceLive do
           />
         </div>
 
-        <%!-- Worker Agent Cards Grid --%>
+        <%!-- Team Agents Section --%>
         <div class="flex-shrink-0 p-3 pb-0">
+          <div class="flex items-center gap-2 mb-2">
+            <div class="flex items-center gap-1.5">
+              <svg class="w-3.5 h-3.5 text-muted" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M7 8a3 3 0 100-6 3 3 0 000 6zM14.5 9a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM1.615 16.428a1.224 1.224 0 01-.569-1.175 6.002 6.002 0 0111.908 0c.058.467-.172.92-.57 1.174A9.953 9.953 0 017 18a9.953 9.953 0 01-5.385-1.572zM14.5 16h-.106c.07-.297.088-.611.048-.933a7.47 7.47 0 00-1.588-3.755 4.502 4.502 0 015.874 2.636.818.818 0 01-.36.98A7.465 7.465 0 0114.5 16z" />
+              </svg>
+              <span class="text-xs font-medium text-muted uppercase tracking-wider">Team</span>
+            </div>
+            <span
+              class="text-[10px] tabular-nums px-1.5 py-0.5 rounded-full font-medium text-muted"
+              style="background: var(--surface-2);"
+            >
+              {length(@worker_cards)}
+            </span>
+            <div class="flex-1 h-px" style="background: var(--border-subtle);"></div>
+          </div>
+
           <div
             :if={@concierge_card == nil && @worker_cards == []}
-            class="text-center py-8"
+            class="rounded-lg border border-dashed py-6 text-center"
+            style="border-color: var(--border-subtle); background: var(--surface-1);"
           >
-            <div class="text-muted text-xs">Waiting for agents to spawn...</div>
+            <svg
+              class="w-5 h-5 mx-auto mb-1.5 text-muted opacity-40"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+            >
+              <path d="M7 8a3 3 0 100-6 3 3 0 000 6zM14.5 9a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM1.615 16.428a1.224 1.224 0 01-.569-1.175 6.002 6.002 0 0111.908 0c.058.467-.172.92-.57 1.174A9.953 9.953 0 017 18a9.953 9.953 0 01-5.385-1.572zM14.5 16h-.106c.07-.297.088-.611.048-.933a7.47 7.47 0 00-1.588-3.755 4.502 4.502 0 015.874 2.636.818.818 0 01-.36.98A7.465 7.465 0 0114.5 16z" />
+            </svg>
+            <div class="text-muted text-xs">Specialists will appear here as they spawn</div>
           </div>
-          <div
-            :if={@worker_cards != []}
-            class={["grid gap-3", card_grid_cols(length(@worker_cards))]}
-          >
-            <LoomkinWeb.AgentCardComponent.agent_card
-              :for={card <- @worker_cards}
-              card={card}
-              focused={false}
-              team_id={@active_team_id}
-              queue_count={queue_count_for(@agent_queues, card.name)}
-              scheduled_count={scheduled_count_for(@scheduled_messages, card.name)}
-            />
-          </div>
+
+          <%= if @worker_cards != [] do %>
+            <div class={["grid gap-3", card_grid_cols(length(@worker_cards))]}>
+              <LoomkinWeb.AgentCardComponent.agent_card
+                :for={card <- @worker_cards}
+                card={card}
+                focused={false}
+                team_id={@active_team_id}
+                queue_count={queue_count_for(@agent_queues, card.name)}
+                scheduled_count={scheduled_count_for(@scheduled_messages, card.name)}
+              />
+            </div>
+          <% end %>
         </div>
 
         <%!-- Comms Feed (scrollable, takes remaining space) --%>
@@ -2810,7 +2846,7 @@ defmodule LoomkinWeb.WorkspaceLive do
               type="button"
               phx-click="toggle_queue_from_composer"
               class="flex items-center justify-center h-9 px-2 rounded-lg transition-all duration-200 press-down"
-              style={"border: 1px solid var(--border-subtle); color: var(--text-muted); background: transparent;"}
+              style="border: 1px solid var(--border-subtle); color: var(--text-muted); background: transparent;"
               title="View message queue"
             >
               <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -2887,7 +2923,11 @@ defmodule LoomkinWeb.WorkspaceLive do
               title="Schedule message"
             >
               <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 000-1.5h-3.25V5z" clip-rule="evenodd" />
+                <path
+                  fill-rule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 000-1.5h-3.25V5z"
+                  clip-rule="evenodd"
+                />
               </svg>
             </button>
 
@@ -2917,7 +2957,10 @@ defmodule LoomkinWeb.WorkspaceLive do
 
           <%!-- Inject guidance button (when agent is working) --%>
           <button
-            :if={@status != :thinking && @reply_target && agent_is_working?(@agent_cards, @reply_target.agent)}
+            :if={
+              @status != :thinking && @reply_target &&
+                agent_is_working?(@agent_cards, @reply_target.agent)
+            }
             type="button"
             phx-click="inject_guidance"
             class="flex items-center gap-1 h-9 px-2.5 rounded-lg transition-all duration-200 press-down text-[11px] font-medium"
@@ -2925,7 +2968,11 @@ defmodule LoomkinWeb.WorkspaceLive do
             title={"Guide #{@reply_target.agent} without pausing"}
           >
             <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M9.69 18.933l.003.001C9.89 19.02 10 19 10 19s.11.02.308-.066l.002-.001.006-.003.018-.008a5.741 5.741 0 00.281-.14c.186-.096.446-.24.757-.433.62-.384 1.445-.966 2.274-1.765C15.302 14.988 17 12.493 17 9A7 7 0 103 9c0 3.492 1.698 5.988 3.355 7.584a13.731 13.731 0 002.274 1.765 11.307 11.307 0 00.757.433c.11.057.19.095.237.117l.025.012.006.003zm.28-12.182a1.25 1.25 0 10-1.94 1.577 1.25 1.25 0 001.94-1.577zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd" />
+              <path
+                fill-rule="evenodd"
+                d="M9.69 18.933l.003.001C9.89 19.02 10 19 10 19s.11.02.308-.066l.002-.001.006-.003.018-.008a5.741 5.741 0 00.281-.14c.186-.096.446-.24.757-.433.62-.384 1.445-.966 2.274-1.765C15.302 14.988 17 12.493 17 9A7 7 0 103 9c0 3.492 1.698 5.988 3.355 7.584a13.731 13.731 0 002.274 1.765 11.307 11.307 0 00.757.433c.11.057.19.095.237.117l.025.012.006.003zm.28-12.182a1.25 1.25 0 10-1.94 1.577 1.25 1.25 0 001.94-1.577zM10 11a2 2 0 100-4 2 2 0 000 4z"
+                clip-rule="evenodd"
+              />
             </svg>
             Guide
           </button>
