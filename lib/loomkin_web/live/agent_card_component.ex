@@ -199,7 +199,11 @@ defmodule LoomkinWeb.AgentCardComponent do
           title={"#{@scheduled_count} scheduled messages"}
         >
           <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 000-1.5h-3.25V5z" clip-rule="evenodd" />
+            <path
+              fill-rule="evenodd"
+              d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 000-1.5h-3.25V5z"
+              clip-rule="evenodd"
+            />
           </svg>
           {@scheduled_count}
         </span>
@@ -320,8 +324,12 @@ defmodule LoomkinWeb.AgentCardComponent do
       |> MDEx.Document.put_markdown(content)
 
     case MDEx.to_html(doc) do
-      {:ok, html} -> Phoenix.HTML.raw(html)
-      _ -> Phoenix.HTML.raw("<p>#{Phoenix.HTML.html_escape(content)}</p>")
+      {:ok, html} ->
+        Phoenix.HTML.raw(html)
+
+      _ ->
+        {:safe, escaped} = Phoenix.HTML.html_escape(content)
+        Phoenix.HTML.raw("<p>#{escaped}</p>")
     end
   end
 

@@ -63,6 +63,24 @@ defmodule Loomkin.Teams.QueuedMessage do
   @spec to_dispatchable(t()) :: term()
   def to_dispatchable(%__MODULE__{content: content}), do: content
 
+  @doc "Convert to a plain map safe for JSON serialization and signal transport."
+  @spec to_serializable(t()) :: map()
+  def to_serializable(%__MODULE__{} = qm) do
+    %{
+      id: qm.id,
+      content: serialize_content(qm.content),
+      source: qm.source,
+      priority: qm.priority,
+      status: qm.status,
+      queued_at: qm.queued_at,
+      metadata: qm.metadata
+    }
+  end
+
+  defp serialize_content({:inject_system_message, text}) when is_binary(text), do: text
+  defp serialize_content(text) when is_binary(text), do: text
+  defp serialize_content(other), do: inspect(other)
+
   defp generate_id do
     "qm_#{:erlang.unique_integer([:positive, :monotonic])}"
   end

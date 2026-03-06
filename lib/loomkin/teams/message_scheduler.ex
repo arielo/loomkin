@@ -14,6 +14,7 @@ defmodule Loomkin.Teams.MessageScheduler do
   alias Loomkin.Teams.Manager
 
   @retry_delay_ms 30_000
+  @max_retries 10
 
   defmodule ScheduledMessage do
     @moduledoc false
@@ -28,7 +29,8 @@ defmodule Loomkin.Teams.MessageScheduler do
       :scheduled_at,
       :status,
       :timer_ref,
-      :metadata
+      :metadata,
+      retry_count: 0
     ]
   end
 
@@ -141,33 +143,14 @@ defmodule Loomkin.Teams.MessageScheduler do
   def handle_call({:edit, message_id, changes}, _from, state) do
     case Map.fetch(state.scheduled, message_id) do
       {:ok, %ScheduledMessage{status: :pending} = msg} ->
-        msg =
-          if Map.has_key?(changes, :content) do
-            %{msg | content: changes.content}
-          else
-            msg
-          end
-
-        msg =
-          if Map.has_key?(changes, :deliver_at) do
-            new_deliver_at = changes.deliver_at
-            now = DateTime.utc_now()
-
-            if DateTime.compare(new_deliver_at, now) == :lt do
-              throw({:error, :in_the_past})
-            end
-
-            Process.cancel_timer(msg.timer_ref)
-            delay_ms = DateTime.diff(new_deliver_at, now, :millisecond)
-            new_timer = Process.send_after(self(), {:deliver, message_id}, delay_ms)
-            %{msg | deliver_at: new_deliver_at, timer_ref: new_timer}
-          else
-            msg
-          end
-
-        state = put_in(state.scheduled[message_id], msg)
-        broadcast_update(state)
-        {:reply, {:ok, msg}, state}
+        with {:ok, msg} <- maybe_update_content(msg, changes),
+             {:ok, msg} <- maybe_update_deliver_at(msg, message_id, changes) do
+          state = put_in(state.scheduled[message_id], msg)
+          broadcast_update(state)
+          {:reply, {:ok, msg}, state}
+        else
+          {:error, reason} -> {:reply, {:error, reason}, state}
+        end
 
       {:ok, _msg} ->
         {:reply, {:error, :not_pending}, state}
@@ -175,8 +158,6 @@ defmodule Loomkin.Teams.MessageScheduler do
       :error ->
         {:reply, {:error, :not_found}, state}
     end
-  catch
-    {:error, reason} -> {:reply, {:error, reason}, state}
   end
 
   def handle_call({:list, opts}, _from, state) do
@@ -239,23 +220,82 @@ defmodule Loomkin.Teams.MessageScheduler do
     {:noreply, state}
   end
 
+  @impl true
+  def terminate(_reason, state) do
+    for {_id, %ScheduledMessage{timer_ref: ref}} when ref != nil <- state.scheduled do
+      Process.cancel_timer(ref)
+    end
+
+    :ok
+  end
+
   # --- Private ---
+
+  defp maybe_update_content(msg, changes) do
+    if Map.has_key?(changes, :content) do
+      {:ok, %{msg | content: changes.content}}
+    else
+      {:ok, msg}
+    end
+  end
+
+  defp maybe_update_deliver_at(msg, message_id, changes) do
+    if Map.has_key?(changes, :deliver_at) do
+      new_deliver_at = changes.deliver_at
+      now = DateTime.utc_now()
+
+      if DateTime.compare(new_deliver_at, now) == :lt do
+        {:error, :in_the_past}
+      else
+        Process.cancel_timer(msg.timer_ref)
+        delay_ms = DateTime.diff(new_deliver_at, now, :millisecond)
+        new_timer = Process.send_after(self(), {:deliver, message_id}, delay_ms)
+        {:ok, %{msg | deliver_at: new_deliver_at, timer_ref: new_timer}}
+      end
+    else
+      {:ok, msg}
+    end
+  end
 
   defp attempt_delivery(state, msg) do
     case Manager.find_agent(msg.team_id, msg.target_agent) do
       {:ok, pid} ->
-        case Agent.send_message(pid, msg.content) do
-          {:error, :busy} ->
+        try do
+          Agent.send_message(pid, msg.content)
+        catch
+          :exit, reason -> {:error, {:exit, reason}}
+        end
+        |> case do
+          {:error, :busy} when msg.retry_count < @max_retries ->
             Logger.info(
-              "[MessageScheduler] Agent #{msg.target_agent} busy, retrying in #{div(@retry_delay_ms, 1000)}s"
+              "[MessageScheduler] Agent #{msg.target_agent} busy, retry #{msg.retry_count + 1}/#{@max_retries}"
             )
 
             timer_ref = Process.send_after(self(), {:retry_deliver, msg.id}, @retry_delay_ms)
-            updated = %{msg | timer_ref: timer_ref}
+            updated = %{msg | timer_ref: timer_ref, retry_count: msg.retry_count + 1}
+            put_in(state.scheduled[msg.id], updated)
+
+          {:error, :busy} ->
+            Logger.warning(
+              "[MessageScheduler] Agent #{msg.target_agent} busy after #{@max_retries} retries, marking #{msg.id} as failed"
+            )
+
+            updated = %{msg | status: :failed, timer_ref: nil}
             state = put_in(state.scheduled[msg.id], updated)
+            broadcast_update(state)
             state
 
-          _ ->
+          {:error, reason} ->
+            Logger.warning(
+              "[MessageScheduler] Delivery of #{msg.id} to #{msg.target_agent} failed: #{inspect(reason)}"
+            )
+
+            updated = %{msg | status: :failed, timer_ref: nil}
+            state = put_in(state.scheduled[msg.id], updated)
+            broadcast_update(state)
+            state
+
+          _ok ->
             Logger.info(
               "[MessageScheduler] Delivered scheduled message #{msg.id} to #{msg.target_agent}"
             )

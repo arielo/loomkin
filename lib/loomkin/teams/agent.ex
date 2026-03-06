@@ -372,7 +372,7 @@ defmodule Loomkin.Teams.Agent do
       )
 
     state =
-      if priority == :high do
+      if priority in [:urgent, :high] do
         %{state | priority_queue: state.priority_queue ++ [qm]}
       else
         %{state | pending_updates: state.pending_updates ++ [qm]}
@@ -389,9 +389,20 @@ defmodule Loomkin.Teams.Agent do
 
   @impl true
   def handle_call({:edit_queued, message_id, new_content}, _from, state) do
-    {found, state} = update_queued_message(state, message_id, fn qm ->
-      %{qm | content: new_content, status: :editing}
-    end)
+    {found, state} =
+      update_queued_message(state, message_id, fn qm ->
+        # Preserve the original content wrapper so the message remains dispatchable
+        updated_content =
+          case {qm.content, new_content} do
+            {{:inject_system_message, _old}, text} when is_binary(text) ->
+              {:inject_system_message, text}
+
+            _ ->
+              new_content
+          end
+
+        %{qm | content: updated_content, status: :editing}
+      end)
 
     if found do
       broadcast_queue_update(state)
@@ -403,13 +414,13 @@ defmodule Loomkin.Teams.Agent do
 
   @impl true
   def handle_call({:reorder_queue, queue_type, ordered_ids}, _from, state) do
-    {queue_field, state_field} =
+    queue_list =
       case queue_type do
-        :priority -> {state.priority_queue, :priority_queue}
-        :pending -> {state.pending_updates, :pending_updates}
+        :priority -> state.priority_queue
+        :pending -> state.pending_updates
       end
 
-    id_map = Map.new(queue_field, fn qm -> {qm.id, qm} end)
+    id_map = Map.new(queue_list, fn qm -> {qm.id, qm} end)
 
     reordered =
       ordered_ids
@@ -420,9 +431,14 @@ defmodule Loomkin.Teams.Agent do
     remaining_ids = MapSet.new(ordered_ids)
 
     leftover =
-      Enum.reject(queue_field, fn qm -> MapSet.member?(remaining_ids, qm.id) end)
+      Enum.reject(queue_list, fn qm -> MapSet.member?(remaining_ids, qm.id) end)
 
-    state = Map.put(state, state_field, reordered ++ leftover)
+    state =
+      case queue_type do
+        :priority -> %{state | priority_queue: reordered ++ leftover}
+        :pending -> %{state | pending_updates: reordered ++ leftover}
+      end
+
     broadcast_queue_update(state)
     {:reply, :ok, state}
   end
@@ -1714,7 +1730,9 @@ defmodule Loomkin.Teams.Agent do
   end
 
   defp broadcast_queue_update(state) do
-    queue = list_full_queue(state)
+    queue =
+      list_full_queue(state)
+      |> Enum.map(&QueuedMessage.to_serializable/1)
 
     Loomkin.Signals.Agent.QueueUpdated.new!(%{
       agent_name: to_string(state.name),
@@ -1818,7 +1836,10 @@ defmodule Loomkin.Teams.Agent do
     {:noreply, state}
   end
 
-  defp handle_urgent(_msg, state), do: {:noreply, state}
+  defp handle_urgent(msg, state) do
+    Logger.warning("[Agent:#{state.name}] Unhandled urgent message: #{inspect(msg)}")
+    {:noreply, state}
+  end
 
   @doc false
   def resolve_project_path(team_id, fallback) do

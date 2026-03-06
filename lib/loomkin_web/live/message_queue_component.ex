@@ -12,21 +12,20 @@ defmodule LoomkinWeb.MessageQueueComponent do
   attr :queue, :list, required: true
   attr :agent_name, :string, required: true
   attr :team_id, :string, required: true
-  attr :selected_ids, :any, default: nil
+  attr :selected_ids, :any, default: %MapSet{}
   attr :editing_id, :string, default: nil
 
   def queue_drawer(assigns) do
-    selected = assigns.selected_ids || MapSet.new()
-    selected_count = MapSet.size(selected)
+    selected_count = MapSet.size(assigns.selected_ids)
 
     assigns =
       assigns
-      |> Phoenix.Component.assign(:selected, selected)
+      |> Phoenix.Component.assign(:selected, assigns.selected_ids)
       |> Phoenix.Component.assign(:selected_count, selected_count)
 
     ~H"""
     <div
-      id="queue-drawer"
+      id={"queue-drawer-#{@agent_name}"}
       class="fixed inset-y-0 right-0 z-50 w-80 flex flex-col animate-slide-in-right"
       style="background: var(--surface-1); border-left: 1px solid var(--border-subtle); box-shadow: -4px 0 24px rgba(0,0,0,0.3);"
       phx-click-away="close_queue_drawer"
@@ -40,9 +39,7 @@ defmodule LoomkinWeb.MessageQueueComponent do
         <span class="text-sm font-medium" style="color: var(--text-primary);">
           {@agent_name}
         </span>
-        <span
-          class="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-indigo-500/15 text-indigo-400"
-        >
+        <span class="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-indigo-500/15 text-indigo-400">
           {length(@queue)} queued
         </span>
         <div class="flex-1"></div>
@@ -91,9 +88,10 @@ defmodule LoomkinWeb.MessageQueueComponent do
 
       <%!-- Queue list --%>
       <div
-        id="queue-list"
+        id={"queue-list-#{@agent_name}"}
         class="flex-1 overflow-auto"
         phx-hook="SortableQueue"
+        phx-update="ignore"
         data-agent={@agent_name}
       >
         <%= if @queue == [] do %>
@@ -119,7 +117,7 @@ defmodule LoomkinWeb.MessageQueueComponent do
                   rows="3"
                   class="w-full rounded-lg px-3 py-2 text-xs resize-none focus:outline-none"
                   style="background: var(--surface-0); border: 1px solid var(--border-brand); color: var(--text-primary); caret-color: var(--brand);"
-                  phx-hook="AutoFocus"
+                  autofocus
                   id={"queue-edit-#{msg.id}"}
                 >{msg.content}</textarea>
                 <div class="flex gap-1.5 justify-end">
@@ -160,7 +158,11 @@ defmodule LoomkinWeb.MessageQueueComponent do
                 <div class="flex-1 min-w-0">
                   <%!-- Priority + source badges --%>
                   <div class="flex items-center gap-1.5 mb-1">
-                    <span class={["w-1.5 h-1.5 rounded-full flex-shrink-0", priority_dot_class(msg.priority)]}></span>
+                    <span class={[
+                      "w-1.5 h-1.5 rounded-full flex-shrink-0",
+                      priority_dot_class(msg.priority)
+                    ]}>
+                    </span>
                     <span class={[
                       "text-[10px] px-1.5 py-0.5 rounded font-medium",
                       source_badge_class(msg.source)
@@ -173,7 +175,10 @@ defmodule LoomkinWeb.MessageQueueComponent do
                   </div>
 
                   <%!-- Content preview --%>
-                  <p class="text-xs leading-relaxed line-clamp-2" style="color: var(--text-secondary);">
+                  <p
+                    class="text-xs leading-relaxed line-clamp-2"
+                    style="color: var(--text-secondary);"
+                  >
                     {msg.content}
                   </p>
                 </div>

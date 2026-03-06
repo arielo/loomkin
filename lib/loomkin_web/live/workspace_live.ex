@@ -963,11 +963,7 @@ defmodule LoomkinWeb.WorkspaceLive do
         %{agent: agent_name, team_id: team_id} ->
           case Loomkin.Teams.Manager.find_agent(team_id, agent_name) do
             {:ok, pid} ->
-              Loomkin.Teams.Agent.enqueue(pid, %{
-                content: text,
-                source: :user,
-                priority: :normal
-              })
+              Loomkin.Teams.Agent.enqueue(pid, text, source: :user, priority: :normal)
 
             :error ->
               Logger.warning("[WorkspaceLive] Cannot enqueue — agent #{agent_name} not found")
@@ -1204,6 +1200,11 @@ defmodule LoomkinWeb.WorkspaceLive do
     else
       {:noreply, socket}
     end
+  end
+
+  def handle_info(%Jido.Signal{type: "agent.queue.updated"} = sig, socket) do
+    %{agent_name: agent_name, queue: queue} = sig.data
+    handle_info({:queue_updated, agent_name, queue}, socket)
   end
 
   # Catch-all for unhandled signal types — log and ignore
@@ -2173,28 +2174,40 @@ defmodule LoomkinWeb.WorkspaceLive do
         target = msg.target_agent
         content = msg.content
 
-        if target do
-          case Loomkin.Teams.Manager.find_agent(team_id, target) do
-            {:ok, pid} ->
-              Task.Supervisor.start_child(Loomkin.Teams.TaskSupervisor, fn ->
-                Loomkin.Teams.Agent.send_message(pid, content)
-              end)
+        delivery_result =
+          if target do
+            case Loomkin.Teams.Manager.find_agent(team_id, target) do
+              {:ok, pid} ->
+                Task.Supervisor.start_child(Loomkin.Teams.TaskSupervisor, fn ->
+                  Loomkin.Teams.Agent.send_message(pid, content)
+                end)
 
-            :error ->
-              Logger.warning(
-                "[WorkspaceLive] Scheduled delivery failed — agent #{target} not found"
-              )
+                :ok
+
+              :error ->
+                Logger.warning(
+                  "[WorkspaceLive] Scheduled delivery failed — agent #{target} not found"
+                )
+
+                :error
+            end
+          else
+            Session.send_message(socket.assigns.session_id, content)
+            :ok
           end
-        else
-          Session.send_message(socket.assigns.session_id, content)
-        end
 
         scheduled = Enum.reject(socket.assigns.scheduled_messages, &(&1.id == message_id))
+
+        flash =
+          case delivery_result do
+            :ok -> {:info, "Scheduled message sent to #{target || "Team"}"}
+            :error -> {:error, "Scheduled delivery failed — agent #{target} not found"}
+          end
 
         {:noreply,
          socket
          |> assign(scheduled_messages: scheduled)
-         |> put_flash(:info, "Scheduled message delivered to #{target || "Team"}")}
+         |> put_flash(elem(flash, 0), elem(flash, 1))}
     end
   end
 

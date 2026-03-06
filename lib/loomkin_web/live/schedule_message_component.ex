@@ -33,7 +33,7 @@ defmodule LoomkinWeb.ScheduleMessageComponent do
 
     ~H"""
     <div
-      id="schedule-popover"
+      id={"schedule-popover-#{@target_agent || "team"}"}
       class="absolute bottom-full right-0 mb-2 w-80 z-50 animate-scale-in"
       style="background: var(--surface-1); border: 1px solid var(--border-subtle); border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.4);"
       phx-click-away="close_scheduler"
@@ -60,7 +60,10 @@ defmodule LoomkinWeb.ScheduleMessageComponent do
       <div class="p-4">
         <%!-- Target display --%>
         <div class="flex items-center gap-2 mb-3">
-          <span class="text-[10px] font-medium uppercase tracking-wider" style="color: var(--text-muted);">
+          <span
+            class="text-[10px] font-medium uppercase tracking-wider"
+            style="color: var(--text-muted);"
+          >
             To
           </span>
           <span class="text-xs font-medium" style="color: var(--text-brand);">
@@ -69,7 +72,7 @@ defmodule LoomkinWeb.ScheduleMessageComponent do
         </div>
 
         <%!-- Message preview / editor --%>
-        <form phx-submit="schedule_message" id="schedule-form">
+        <form phx-submit="schedule_message" id={"schedule-form-#{@target_agent || "team"}"}>
           <input
             :if={@target_agent}
             type="hidden"
@@ -145,7 +148,10 @@ defmodule LoomkinWeb.ScheduleMessageComponent do
         style="border-top: 1px solid var(--border-subtle);"
       >
         <div class="px-4 py-2">
-          <span class="text-[10px] font-medium uppercase tracking-wider" style="color: var(--text-muted);">
+          <span
+            class="text-[10px] font-medium uppercase tracking-wider"
+            style="color: var(--text-muted);"
+          >
             Scheduled ({length(@scheduled_messages)})
           </span>
         </div>
@@ -162,7 +168,7 @@ defmodule LoomkinWeb.ScheduleMessageComponent do
               </p>
               <div class="flex items-center gap-2 mt-0.5">
                 <span class="text-[10px] text-muted">
-                  {if msg[:target_agent], do: msg.target_agent, else: "Team"}
+                  {Map.get(msg, :target_agent) || "Team"}
                 </span>
                 <span class="text-[10px] text-amber-400">
                   {scheduled_countdown(msg.deliver_at)}

@@ -120,6 +120,7 @@ defmodule Loomkin.Teams.AgentAsyncTest do
       Process.sleep(50)
 
       state = :sys.get_state(pid)
+
       matching =
         Enum.filter(state.pending_updates, fn qm ->
           qm.content == {:context_update, "peer-1", %{info: "test"}}
@@ -358,7 +359,10 @@ defmodule Loomkin.Teams.AgentAsyncTest do
       fake_task = %Task{pid: self(), ref: ref, owner: self(), mfa: {__MODULE__, :fake, []}}
 
       pending_qm =
-        QueuedMessage.new({:context_update, "peer-1", %{v: 1}}, priority: :normal, source: :system)
+        QueuedMessage.new({:context_update, "peer-1", %{v: 1}},
+          priority: :normal,
+          source: :system
+        )
 
       priority_qm =
         QueuedMessage.new({:tasks_unblocked, ["t1"]}, priority: :high, source: :system)
