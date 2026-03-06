@@ -9,6 +9,7 @@ defmodule Loomkin.Permissions.Manager do
 
   import Ecto.Query
   alias Loomkin.Repo
+  alias Loomkin.Schemas.PermissionAuditLog
   alias Loomkin.Schemas.PermissionGrant
 
   @read_tools ~w(file_read file_search content_search directory_list decision_query sub_agent lsp_diagnostics)
@@ -101,6 +102,29 @@ defmodule Loomkin.Permissions.Manager do
       tool_name in @coordination_tools -> :coordination
       true -> :unknown
     end
+  end
+
+  @doc """
+  Record a permission decision to the audit log.
+  """
+  def record_decision(attrs) when is_map(attrs) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    %PermissionAuditLog{}
+    |> PermissionAuditLog.changeset(Map.put_new(attrs, :decided_at, now))
+    |> Repo.insert()
+  end
+
+  @doc """
+  List recent permission decisions for a session.
+  """
+  def list_recent_decisions(session_id, limit \\ 20) do
+    from(l in PermissionAuditLog,
+      where: l.session_id == ^session_id,
+      order_by: [desc: l.decided_at],
+      limit: ^limit
+    )
+    |> Repo.all()
   end
 
   # --- Private ---

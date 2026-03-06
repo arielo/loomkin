@@ -27,7 +27,7 @@ defmodule LoomkinWeb.WorkspaceLive do
         file_content: nil,
         diffs: [],
         shell_commands: [],
-        permission_request: nil,
+        pending_permissions: [],
         page_title: "Loomkin Workspace",
         team_id: params["team_id"],
         child_teams: [],
@@ -475,24 +475,27 @@ defmodule LoomkinWeb.WorkspaceLive do
 
   def handle_event(
         "permission_response",
-        %{"action" => action, "tool_name" => tool_name, "tool_path" => tool_path},
+        %{"action" => action, "id" => request_id},
         socket
       ) do
-    route_permission_response(socket, action, tool_name, tool_path)
-    {:noreply, assign(socket, permission_request: nil)}
-  end
+    {request, remaining} =
+      pop_permission_request(socket.assigns.pending_permissions, request_id)
 
-  def handle_event("permission_response", %{"action" => action}, socket) do
-    # Fallback when tool_name/tool_path come from the assign
-    case socket.assigns.permission_request do
-      %{tool_name: tool_name, tool_path: tool_path} ->
-        route_permission_response(socket, action, tool_name, tool_path)
-
-      _ ->
-        :ok
+    if request do
+      route_permission_response(socket, action, request)
     end
 
-    {:noreply, assign(socket, permission_request: nil)}
+    {:noreply, assign(socket, pending_permissions: remaining)}
+  end
+
+  def handle_event("permission_batch_action", %{"action" => action, "scope" => scope}, socket) do
+    {to_act, to_keep} = split_permissions_by_scope(socket.assigns.pending_permissions, scope)
+
+    for request <- to_act do
+      route_permission_response(socket, action, request)
+    end
+
+    {:noreply, assign(socket, pending_permissions: to_keep)}
   end
 
   @valid_sub_tabs ~w(activity cost graph)
@@ -576,7 +579,6 @@ defmodule LoomkinWeb.WorkspaceLive do
          assign(socket,
            focused_agent: nil,
            inspector_mode: :auto_follow,
-           permission_request: nil,
            reply_target: nil
          )}
     end
@@ -1148,7 +1150,26 @@ defmodule LoomkinWeb.WorkspaceLive do
 
   def handle_info(%Jido.Signal{type: "team.permission.request"} = sig, socket) do
     %{team_id: tid, tool_name: tn, tool_path: tp, source: source} = sig.data
-    handle_info({:permission_request, tid, tn, tp, source}, socket)
+
+    agent_name =
+      case source do
+        {:agent, _team_id, name} -> to_string(name)
+        _ -> "session"
+      end
+
+    request = %{
+      id: Ecto.UUID.generate(),
+      tool_name: tn,
+      tool_path: tp,
+      source: source,
+      agent_name: agent_name,
+      team_id: tid,
+      category: Loomkin.Permissions.Manager.tool_category(tn),
+      requested_at: DateTime.utc_now()
+    }
+
+    pending = socket.assigns.pending_permissions ++ [request]
+    {:noreply, assign(socket, pending_permissions: pending)}
   end
 
   def handle_info(%Jido.Signal{type: "team.dissolved"} = sig, socket) do
@@ -1378,19 +1399,43 @@ defmodule LoomkinWeb.WorkspaceLive do
   end
 
   # 5-tuple with source tag (from architect :session or {:agent, team_id, name})
-  def handle_info({:permission_request, _id, tool_name, tool_path, source}, socket) do
-    {:noreply,
-     assign(socket,
-       permission_request: %{tool_name: tool_name, tool_path: tool_path, source: source}
-     )}
+  def handle_info({:permission_request, team_id, tool_name, tool_path, source}, socket) do
+    agent_name =
+      case source do
+        {:agent, _team_id, name} -> to_string(name)
+        _ -> "session"
+      end
+
+    request = %{
+      id: Ecto.UUID.generate(),
+      tool_name: tool_name,
+      tool_path: tool_path,
+      source: source,
+      agent_name: agent_name,
+      team_id: team_id,
+      category: Loomkin.Permissions.Manager.tool_category(tool_name),
+      requested_at: DateTime.utc_now()
+    }
+
+    pending = socket.assigns.pending_permissions ++ [request]
+    {:noreply, assign(socket, pending_permissions: pending)}
   end
 
   # 4-tuple backwards compat (default to :session source)
-  def handle_info({:permission_request, _session_id, tool_name, tool_path}, socket) do
-    {:noreply,
-     assign(socket,
-       permission_request: %{tool_name: tool_name, tool_path: tool_path, source: :session}
-     )}
+  def handle_info({:permission_request, session_id, tool_name, tool_path}, socket) do
+    request = %{
+      id: Ecto.UUID.generate(),
+      tool_name: tool_name,
+      tool_path: tool_path,
+      source: :session,
+      agent_name: "session",
+      team_id: session_id,
+      category: Loomkin.Permissions.Manager.tool_category(tool_name),
+      requested_at: DateTime.utc_now()
+    }
+
+    pending = socket.assigns.pending_permissions ++ [request]
+    {:noreply, assign(socket, pending_permissions: pending)}
   end
 
   def handle_info({:team_available, _session_id, team_id}, socket) do
@@ -1618,9 +1663,31 @@ defmodule LoomkinWeb.WorkspaceLive do
     {:noreply, push_navigate(socket, to: ~p"/sessions/#{session_id}")}
   end
 
+  def handle_info({:permission_response, action, request_id}, socket) do
+    {request, remaining} =
+      pop_permission_request(socket.assigns.pending_permissions, request_id)
+
+    if request do
+      route_permission_response(socket, action, request)
+    end
+
+    {:noreply, assign(socket, pending_permissions: remaining)}
+  end
+
+  # Legacy 4-arg format (from old PermissionComponent)
   def handle_info({:permission_response, action, tool_name, tool_path}, socket) do
-    route_permission_response(socket, action, tool_name, tool_path)
-    {:noreply, assign(socket, permission_request: nil)}
+    {request, remaining} =
+      pop_permission_request_by_tool(
+        socket.assigns.pending_permissions,
+        tool_name,
+        tool_path
+      )
+
+    if request do
+      route_permission_response(socket, action, request)
+    end
+
+    {:noreply, assign(socket, pending_permissions: remaining)}
   end
 
   # Team PubSub events -- forward to team components via send_update
@@ -2279,13 +2346,12 @@ defmodule LoomkinWeb.WorkspaceLive do
       phx-hook="KeyboardShortcuts"
       id="workspace-shortcuts"
     >
-      <%!-- Permission modal overlay --%>
+      <%!-- Permission Dashboard --%>
       <.live_component
-        :if={@permission_request}
-        module={LoomkinWeb.PermissionComponent}
-        id="permission-modal"
-        tool_name={@permission_request.tool_name}
-        tool_path={@permission_request.tool_path}
+        :if={@pending_permissions != []}
+        module={LoomkinWeb.PermissionDashboardComponent}
+        id="permission-dashboard"
+        pending_permissions={@pending_permissions}
       />
 
       <%!-- Switch Project modal overlay --%>
@@ -3421,17 +3487,63 @@ defmodule LoomkinWeb.WorkspaceLive do
     """
   end
 
-  defp route_permission_response(socket, action, tool_name, tool_path) do
-    case socket.assigns.permission_request do
-      %{source: {:agent, team_id, agent_name}} ->
-        case Loomkin.Teams.Manager.find_agent(team_id, agent_name) do
-          {:ok, pid} -> Loomkin.Teams.Agent.permission_response(pid, action, tool_name, tool_path)
-          :error -> :ok
-        end
+  defp route_permission_response(_socket, action, %{source: {:agent, team_id, agent_name}} = req) do
+    case Loomkin.Teams.Manager.find_agent(team_id, agent_name) do
+      {:ok, pid} ->
+        Loomkin.Teams.Agent.permission_response(pid, action, req.tool_name, req.tool_path)
 
-      _ ->
-        Session.permission_response(socket.assigns.session_id, action, tool_name, tool_path)
+      :error ->
+        :ok
     end
+
+    log_permission_decision(req, action)
+  end
+
+  defp route_permission_response(socket, action, req) do
+    Session.permission_response(socket.assigns.session_id, action, req.tool_name, req.tool_path)
+    log_permission_decision(req, action)
+  end
+
+  defp log_permission_decision(req, action) do
+    Loomkin.Permissions.Manager.record_decision(%{
+      session_id: req[:session_id] || req[:team_id],
+      team_id: req.team_id,
+      agent_name: req.agent_name,
+      tool_name: req.tool_name,
+      tool_path: req.tool_path,
+      action: action,
+      comment: req[:comment]
+    })
+  end
+
+  defp pop_permission_request(pending, request_id) do
+    case Enum.split_with(pending, &(&1.id == request_id)) do
+      {[request], remaining} -> {request, remaining}
+      {[], remaining} -> {nil, remaining}
+    end
+  end
+
+  defp pop_permission_request_by_tool(pending, tool_name, tool_path) do
+    case Enum.split_with(pending, &(&1.tool_name == tool_name and &1.tool_path == tool_path)) do
+      {[request | _rest], remaining} -> {request, remaining}
+      {[], remaining} -> {nil, remaining}
+    end
+  end
+
+  defp split_permissions_by_scope(pending, "all_reads") do
+    Enum.split_with(pending, &(&1.category == :read))
+  end
+
+  defp split_permissions_by_scope(pending, "agent:" <> agent_name) do
+    Enum.split_with(pending, &(&1.agent_name == agent_name))
+  end
+
+  defp split_permissions_by_scope(pending, "all") do
+    {pending, []}
+  end
+
+  defp split_permissions_by_scope(pending, _unknown) do
+    {[], pending}
   end
 
   # Subscribe to a team's PubSub topics, but only once per team.
