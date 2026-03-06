@@ -39,6 +39,7 @@ defmodule LoomkinWeb.WorkspaceLive do
         current_step: nil,
         activity_known_agents: [],
         activity_event_count: 0,
+        buffered_activity_events: [],
         # Map of {agent, tool_name} -> event for pending tool results (stream merge)
         pending_tool_events: %{},
         # Mission control assigns — agent cards + comms
@@ -288,7 +289,8 @@ defmodule LoomkinWeb.WorkspaceLive do
       reply_target: nil,
       channel_bindings: channel_bindings,
       kin_agents: load_kin_agents(),
-      trust_preset: Loomkin.Permissions.TrustPolicy.get_preset_name(session_id)
+      trust_preset: Loomkin.Permissions.TrustPolicy.get_preset_name(session_id),
+      trust_expanded: false
     )
   end
 
@@ -488,7 +490,24 @@ defmodule LoomkinWeb.WorkspaceLive do
 
   @valid_tabs ~w(files diff terminal graph)
   def handle_event("switch_tab", %{"tab" => tab}, socket) when tab in @valid_tabs do
-    {:noreply, assign(socket, active_tab: String.to_existing_atom(tab))}
+    tab_atom = String.to_existing_atom(tab)
+
+    socket =
+      if tab_atom == :team and socket.assigns.buffered_activity_events != [] do
+        # Flush buffered events to the component now that it's visible
+        events = Enum.reverse(socket.assigns.buffered_activity_events)
+
+        send_update(LoomkinWeb.TeamActivityComponent,
+          id: "team-activity",
+          reset_events: events
+        )
+
+        assign(socket, buffered_activity_events: [])
+      else
+        socket
+      end
+
+    {:noreply, assign(socket, active_tab: tab_atom)}
   end
 
   def handle_event("change_model", %{"model" => model}, socket) do
@@ -506,6 +525,10 @@ defmodule LoomkinWeb.WorkspaceLive do
 
   def handle_event("deselect_file", _params, socket) do
     {:noreply, assign(socket, selected_file: nil, file_content: nil)}
+  end
+
+  def handle_event("toggle_trust_panel", _params, socket) do
+    {:noreply, update(socket, :trust_expanded, &(!&1))}
   end
 
   @valid_trust_presets ~w(strict balanced autonomous full_trust)
@@ -2343,6 +2366,7 @@ defmodule LoomkinWeb.WorkspaceLive do
         <LoomkinWeb.TrustPolicyComponent.trust_policy_selector
           current_preset={@trust_preset}
           pending_count={length(@pending_permissions)}
+          expanded={@trust_expanded}
           class="hidden md:flex"
         />
 
@@ -3756,13 +3780,18 @@ defmodule LoomkinWeb.WorkspaceLive do
   end
 
   # Send an activity event to the TeamActivityComponent's internal stream
+  # Buffer events when component isn't mounted (e.g., user on a different tab)
   defp push_activity_event(socket, event) do
-    send_update(LoomkinWeb.TeamActivityComponent,
-      id: "team-activity",
-      new_event: event
-    )
+    if socket.assigns[:active_tab] == :team do
+      send_update(LoomkinWeb.TeamActivityComponent,
+        id: "team-activity",
+        new_event: event
+      )
+    end
 
-    update(socket, :activity_event_count, &(&1 + 1))
+    socket
+    |> update(:activity_event_count, &(&1 + 1))
+    |> update(:buffered_activity_events, &[event | Enum.take(&1, 199)])
   end
 
   # Merge tool_complete result into the most recent tool_executing event for that agent

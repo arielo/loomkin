@@ -10,23 +10,19 @@ defmodule LoomkinWeb.TrustPolicyComponent do
 
   use Phoenix.Component
 
-  alias Phoenix.LiveView.JS
-
   attr :current_preset, :atom, required: true
   attr :pending_count, :integer, default: 0
+  attr :expanded, :boolean, default: false
   attr :class, :string, default: ""
 
   def trust_policy_selector(assigns) do
     ~H"""
     <div class={["relative", @class]}>
-      <%!-- Collapsed summary bar (visible by default) --%>
+      <%!-- Collapsed summary bar --%>
       <button
+        :if={!@expanded}
         id="trust-summary"
-        phx-click={
-          JS.toggle(to: "#trust-details")
-          |> JS.toggle(to: "#trust-summary")
-          |> JS.toggle_class("rotate-180", to: "#trust-chevron")
-        }
+        phx-click="toggle_trust_panel"
         class="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-gray-700/30 bg-gray-800/50 cursor-pointer transition-colors hover:bg-gray-800/70"
       >
         <div
@@ -43,8 +39,7 @@ defmodule LoomkinWeb.TrustPolicyComponent do
           {@pending_count}
         </span>
         <svg
-          id="trust-chevron"
-          class="w-3 h-3 transition-transform duration-200"
+          class="w-3 h-3"
           style="color: var(--text-muted);"
           fill="none"
           viewBox="0 0 24 24"
@@ -55,10 +50,11 @@ defmodule LoomkinWeb.TrustPolicyComponent do
         </svg>
       </button>
 
-      <%!-- Expanded details (hidden by default) --%>
+      <%!-- Expanded details --%>
       <div
+        :if={@expanded}
         id="trust-details"
-        class="hidden flex items-center gap-2 px-3 py-1.5 rounded-xl border border-gray-700/30 bg-gray-800/50"
+        class="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-gray-700/30 bg-gray-800/50"
       >
         <span class="text-[10px] text-gray-500 uppercase tracking-wider flex-shrink-0">
           Trust
@@ -87,20 +83,10 @@ defmodule LoomkinWeb.TrustPolicyComponent do
         <button
           class="ml-1 p-0.5 rounded interactive flex-shrink-0"
           style="color: var(--text-muted);"
-          phx-click={
-            JS.toggle(to: "#trust-details")
-            |> JS.toggle(to: "#trust-summary")
-            |> JS.toggle_class("rotate-180", to: "#trust-chevron")
-          }
+          phx-click="toggle_trust_panel"
           title="Collapse"
         >
-          <svg
-            class="w-3 h-3"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            stroke-width="2"
-          >
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7" />
           </svg>
         </button>
