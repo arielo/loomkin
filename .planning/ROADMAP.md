@@ -12,7 +12,7 @@ and the leader research protocol. Each phase delivers one coherent, testable cap
 ## Phases
 
 - [x] **Phase 1: Monolith Extraction** - Decompose workspace_live.ex into focused LiveComponents before any new feature lands
-- [ ] **Phase 2: Signal Infrastructure** - TeamBroadcaster intermediary, Topics module, and subscription cleanup
+- [x] **Phase 2: Signal Infrastructure** - TeamBroadcaster intermediary, Topics module, and subscription cleanup (completed 2026-03-07)
 - [ ] **Phase 3: Live Comms Feed** - Agent-to-agent messages visible in real-time for all teams including dynamic sub-teams
 - [ ] **Phase 4: Task Graph & Crash Recovery** - Visual task dependency graph and OTP crash status reflected in UI
 - [ ] **Phase 5: Chat Injection & State Machines** - Team-wide chat broadcast and typed pause/permission state machines
@@ -162,7 +162,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Monolith Extraction | 6/6 | Complete |  |
-| 2. Signal Infrastructure | 2/3 | In Progress | - |
+| 2. Signal Infrastructure | 3/3 | Complete   | 2026-03-07 |
 | 3. Live Comms Feed | 0/TBD | Not started | - |
 | 4. Task Graph & Crash Recovery | 0/TBD | Not started | - |
 | 5. Chat Injection & State Machines | 0/TBD | Not started | - |
