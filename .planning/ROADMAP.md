@@ -11,7 +11,7 @@ and the leader research protocol. Each phase delivers one coherent, testable cap
 
 ## Phases
 
-- [ ] **Phase 1: Monolith Extraction** - Decompose workspace_live.ex into focused LiveComponents before any new feature lands
+- [x] **Phase 1: Monolith Extraction** - Decompose workspace_live.ex into focused LiveComponents before any new feature lands
 - [ ] **Phase 2: Signal Infrastructure** - TeamBroadcaster intermediary, Topics module, and subscription cleanup
 - [ ] **Phase 3: Live Comms Feed** - Agent-to-agent messages visible in real-time for all teams including dynamic sub-teams
 - [ ] **Phase 4: Task Graph & Crash Recovery** - Visual task dependency graph and OTP crash status reflected in UI
@@ -37,11 +37,11 @@ and the leader research protocol. Each phase delivers one coherent, testable cap
 **Plans**: 5 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Extract CommandPaletteComponent (palette state, events, render)
-- [ ] 01-02-PLAN.md — Extract ComposerComponent (input bar, agent picker, budget bar)
-- [ ] 01-03-PLAN.md — Extract SidebarPanelComponent (files/diff/graph tab panel)
-- [ ] 01-04-PLAN.md — Extract MissionControlPanelComponent (agent card grid + comms feed)
-- [ ] 01-05-PLAN.md — Wire all components into workspace_live.ex orchestrator + integration test
+- [x] 01-01-PLAN.md — Extract CommandPaletteComponent (palette state, events, render)
+- [x] 01-02-PLAN.md — Extract ComposerComponent (input bar, agent picker, budget bar)
+- [x] 01-03-PLAN.md — Extract SidebarPanelComponent (files/diff/graph tab panel)
+- [x] 01-04-PLAN.md — Extract MissionControlPanelComponent (agent card grid + comms feed)
+- [x] 01-05-PLAN.md — Wire all components into workspace_live.ex orchestrator + integration test
 
 ### Phase 2: Signal Infrastructure
 **Goal**: A TeamBroadcaster GenServer sits between the Signal Bus and LiveView, all signal topics are generated through a Topics module, and dead subscriptions are cleaned up on process termination
