@@ -13,7 +13,8 @@ defmodule LoomkinWeb.MissionControlPanelComponentTest do
     kin_agents: [],
     cached_agents: [],
     active_team_id: "team-1",
-    comms_stream: nil
+    comms_stream: nil,
+    leader_approval_pending: nil
   }
 
   test "renders waiting state when no agents" do
@@ -88,5 +89,47 @@ defmodule LoomkinWeb.MissionControlPanelComponentTest do
 
     html = render_component(LoomkinWeb.MissionControlPanelComponent, assigns)
     assert html =~ "All agents"
+  end
+
+  describe "leader approval banner" do
+    test "renders banner with question when leader_approval_pending is non-nil" do
+      assigns =
+        Map.merge(@base_assigns, %{
+          leader_approval_pending: %{
+            gate_id: "gate-123",
+            question: "Should we proceed with the migration?",
+            started_at: 1_700_000_000_000,
+            timeout_ms: 60_000
+          }
+        })
+
+      html = render_component(LoomkinWeb.MissionControlPanelComponent, assigns)
+      assert html =~ ~s(data-testid="leader-approval-banner")
+      assert html =~ "Should we proceed with the migration?"
+    end
+
+    test "does not render banner when leader_approval_pending is nil" do
+      html = render_component(LoomkinWeb.MissionControlPanelComponent, @base_assigns)
+      refute html =~ ~s(data-testid="leader-approval-banner")
+    end
+
+    test "banner has CountdownTimer hook with deadline-at attribute" do
+      started_at = 1_700_000_000_000
+      timeout_ms = 60_000
+
+      assigns =
+        Map.merge(@base_assigns, %{
+          leader_approval_pending: %{
+            gate_id: "gate-123",
+            question: "Proceed?",
+            started_at: started_at,
+            timeout_ms: timeout_ms
+          }
+        })
+
+      html = render_component(LoomkinWeb.MissionControlPanelComponent, assigns)
+      assert html =~ ~s(phx-hook="CountdownTimer")
+      assert html =~ ~s(data-deadline-at="#{started_at + timeout_ms}")
+    end
   end
 end
