@@ -15,7 +15,11 @@ defmodule Loomkin.Teams.AgentWatcherTest do
       Signals.unsubscribe(sub_id)
     end)
 
-    {:ok, watcher} = start_supervised({AgentWatcher, team_id: @team_id})
+    {:ok, watcher} =
+      start_supervised(
+        {AgentWatcher, name: :"watcher_test_#{System.unique_integer([:positive])}"}
+      )
+
     %{watcher: watcher}
   end
 
