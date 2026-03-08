@@ -106,7 +106,13 @@ Plans:
   3. Pausing an agent that has a pending permission request does not clobber the permission — the permission must be resolved first
   4. Resuming a paused agent requires providing new guidance; approving a permission gate requires a yes/no for the specific tool call — the two UI controls are visually distinct
   5. Agent state correctly transitions through idle, running, paused, permission-pending, and approval-pending without any state being silently overwritten by another
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 05-00-PLAN.md — Wave 0: create test stub files for all Phase 5 test targets
+- [ ] 05-01-PLAN.md — State machine guards: pause_queued, guard clauses, approval_pending pre-wire (TDD)
+- [ ] 05-02-PLAN.md — Broadcast messaging: broadcast_mode, send_message branch, paused agent injection, composer indicator, comms types
+- [ ] 05-03-PLAN.md — UI wiring: distinct card controls, dual state indicator, force-pause, steer-only resume, visual verification
 
 ### Phase 6: Approval Gates
 **Goal**: Agents can pause at critical junctures and await human sign-off via a checkpoint-based approval gate that is visually and mechanically distinct from the existing permission hook system
@@ -176,7 +182,7 @@ Plans:
 | 2. Signal Infrastructure | 3/4 | Gap closure | - |
 | 3. Live Comms Feed | 2/2 | Complete   | 2026-03-08 |
 | 4. Task Graph & Crash Recovery | 3/4 | Gap closure | - |
-| 5. Chat Injection & State Machines | 0/TBD | Not started | - |
+| 5. Chat Injection & State Machines | 0/4 | Not started | - |
 | 6. Approval Gates | 0/TBD | Not started | - |
 | 7. Confidence Triggers | 0/TBD | Not started | - |
 | 8. Dynamic Tree Visibility | 0/TBD | Not started | - |
