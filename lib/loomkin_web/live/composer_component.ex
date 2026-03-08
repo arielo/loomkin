@@ -193,14 +193,13 @@ defmodule LoomkinWeb.ComposerComponent do
             <textarea
               name="text"
               rows="1"
+              aria-label="Message to team"
               placeholder={
                 if @reply_target,
                   do: "Reply to #{@reply_target.agent}...",
                   else: "What should we work on?"
               }
-              class="w-full rounded-lg px-3 py-2 text-sm resize-none focus:outline-none transition-all duration-200 bg-surface-0 border border-subtle text-primary caret-brand"
-              onfocus="this.style.borderColor='var(--border-brand)'; this.style.boxShadow='0 0 0 1px rgba(124, 58, 237, 0.2)';"
-              onblur="this.style.borderColor='var(--border-subtle)'; this.style.boxShadow='none';"
+              class="w-full rounded-lg px-3 py-2 text-sm resize-none overflow-hidden focus:outline-none transition-all duration-200 bg-surface-0 border border-subtle text-primary caret-brand"
               phx-hook="ShiftEnterSubmit"
               id="message-input"
             ><%= @input_text %></textarea>

@@ -369,7 +369,15 @@ defmodule LoomkinWeb.TeamActivityComponent do
 
       <%!-- Event Feed --%>
       <div class="flex-1 overflow-auto" id={"activity-feed-#{@id}"} phx-hook="ScrollToBottom">
-        <div id={"activity-stream-#{@id}"} phx-update="stream" class="flex flex-col gap-1.5 p-2.5">
+        <div class="activity-scroll-indicator" aria-hidden="true" />
+        <div
+          id={"activity-stream-#{@id}"}
+          phx-update="stream"
+          role="log"
+          aria-label="Team activity"
+          aria-live="polite"
+          class="flex flex-col gap-1.5 p-2.5"
+        >
           <div class="hidden only:flex items-center justify-center h-48">
             <div class="text-center space-y-3">
               <div class="text-muted text-3xl opacity-30">&#9673;</div>

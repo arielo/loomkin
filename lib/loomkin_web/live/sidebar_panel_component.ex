@@ -19,9 +19,17 @@ defmodule LoomkinWeb.SidebarPanelComponent do
     ~H"""
     <div class="h-[20rem] w-full flex flex-col xl:h-auto xl:w-80 bg-surface-1 border-t border-subtle">
       <%!-- Sidebar tab bar --%>
-      <div class="flex items-center gap-0.5 px-1.5 py-1 overflow-x-auto flex-shrink-0 border-b border-subtle">
+      <div
+        role="tablist"
+        aria-label="Inspector tabs"
+        class="flex items-center gap-0.5 px-1.5 py-1 overflow-x-auto flex-shrink-0 border-b border-subtle"
+      >
         <button
           :for={tab <- [:files, :diff, :graph]}
+          role="tab"
+          aria-selected={to_string(@active_tab == tab)}
+          aria-controls={"tab-panel-#{tab}"}
+          id={"tab-#{tab}"}
           phx-click="switch_tab"
           phx-value-tab={tab}
           phx-target={@myself}
@@ -30,16 +38,19 @@ defmodule LoomkinWeb.SidebarPanelComponent do
               do: "text-brand after:absolute after:bottom-0 after:left-1 after:right-1 after:h-[1.5px] after:rounded-full after:bg-violet-500",
               else: "text-muted")}
         >
-          <span>{tab_icon(tab)}</span>
+          <span aria-hidden="true">{tab_icon(tab)}</span>
           <span class="text-[10px]">{tab_label(tab)}</span>
         </button>
       </div>
 
       <%!-- Sidebar content --%>
       <div
+        role="tabpanel"
+        id={"tab-panel-#{@active_tab}"}
+        aria-labelledby={"tab-#{@active_tab}"}
+        tabindex="0"
         class="flex-1 overflow-auto p-3 tab-content-enter bg-surface-0"
         phx-hook="TabTransition"
-        id={"tab-content-#{@active_tab}"}
       >
         {render_tab(@active_tab, assigns)}
       </div>

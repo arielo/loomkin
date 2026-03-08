@@ -54,7 +54,14 @@ defmodule LoomkinWeb.ChatComponent do
 
   def render(assigns) do
     ~H"""
-    <div class="flex-1 overflow-auto" id="chat-messages" phx-hook="ScrollToBottom">
+    <div
+      class="flex-1 overflow-auto"
+      id="chat-messages"
+      role="log"
+      aria-label="Conversation"
+      aria-live="polite"
+      phx-hook="ScrollToBottom"
+    >
       <div class="flex flex-col gap-4 p-4">
         <%!-- Empty State --%>
         <div :if={!@has_messages} class="flex items-center justify-center h-64">

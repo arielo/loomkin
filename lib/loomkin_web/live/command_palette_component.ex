@@ -61,8 +61,11 @@ defmodule LoomkinWeb.CommandPaletteComponent do
         phx-click="close_command_palette"
         phx-target={@myself}
       >
-        <div class="fixed inset-0 bg-black/60" />
+        <div class="fixed inset-0 bg-black/60" aria-hidden="true" />
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Command palette"
           class="relative w-full max-w-lg card-elevated overflow-hidden"
           style="box-shadow: 0 16px 64px rgba(0,0,0,0.6), 0 0 0 1px var(--border-default);"
           phx-click-away="close_command_palette"
@@ -77,6 +80,7 @@ defmodule LoomkinWeb.CommandPaletteComponent do
               stroke="currentColor"
               stroke-width="2"
               viewBox="0 0 24 24"
+              aria-hidden="true"
             >
               <path
                 stroke-linecap="round"
@@ -87,6 +91,7 @@ defmodule LoomkinWeb.CommandPaletteComponent do
             <input
               type="text"
               id="command-palette-input"
+              aria-label="Search agents, tabs, and actions"
               placeholder="Search agents, tabs, actions..."
               value={@command_palette_query}
               phx-keyup="palette_search"

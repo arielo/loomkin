@@ -88,8 +88,15 @@ defmodule LoomkinWeb.WorkspaceLive do
     case socket.assigns.live_action do
       :new ->
         project_path = params["project_path"] || File.cwd!()
-        session_id = Ecto.UUID.generate()
-        {:ok, start_and_subscribe(socket, session_id, project_path)}
+
+        case Loomkin.Session.Persistence.find_latest_active_session(project_path) do
+          %{id: session_id} ->
+            {:ok, push_navigate(socket, to: ~p"/sessions/#{session_id}")}
+
+          nil ->
+            session_id = Ecto.UUID.generate()
+            {:ok, start_and_subscribe(socket, session_id, project_path)}
+        end
 
       :show ->
         session_id = params["session_id"]

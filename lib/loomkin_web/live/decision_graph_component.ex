@@ -399,6 +399,7 @@ defmodule LoomkinWeb.DecisionGraphComponent do
       phx-target={@myself}
       class={["cursor-pointer", @is_new && "graph-node-new"]}
       role="button"
+      tabindex="0"
     >
       <title>{@tooltip}</title>
       <%!-- Conflict glow ring --%>

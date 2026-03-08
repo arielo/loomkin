@@ -72,12 +72,18 @@ defmodule LoomkinWeb.KinPanelComponent do
       <%!-- Backdrop --%>
       <div
         class="absolute inset-0 bg-black/40"
+        aria-hidden="true"
         phx-click="close_kin_panel"
         phx-target={@myself}
       />
 
       <%!-- Panel --%>
-      <div class="relative w-full max-w-md bg-surface-0 border-l border-subtle flex flex-col animate-slide-in-right">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="kin-panel-title"
+        class="relative w-full max-w-md bg-surface-0 border-l border-subtle flex flex-col animate-slide-in-right"
+      >
         <%!-- Header --%>
         <div class="flex items-center gap-3 p-4 border-b border-subtle">
           <button
@@ -95,7 +101,7 @@ defmodule LoomkinWeb.KinPanelComponent do
             </svg>
           </button>
           <div class="flex-1">
-            <h2 class="text-sm font-semibold text-primary">
+            <h2 id="kin-panel-title" class="text-sm font-semibold text-primary">
               {if @panel_mode == :list,
                 do: "Kin Management",
                 else: if(@editing_id, do: "Edit Template", else: "New Template")}

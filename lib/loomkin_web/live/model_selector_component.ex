@@ -124,6 +124,7 @@ defmodule LoomkinWeb.ModelSelectorComponent do
             </svg>
             <input
               type="text"
+              aria-label="Search models"
               placeholder="Search models..."
               value={@search}
               phx-keyup="search_models"
