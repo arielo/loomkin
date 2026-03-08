@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Completed 06-04-PLAN.md
-last_updated: "2026-03-08T19:03:45.780Z"
+stopped_at: Completed 06-05-PLAN.md
+last_updated: "2026-03-08T19:23:27.394Z"
 last_activity: 2026-03-08 — Distinct agent card controls with force-pause, dual indicator, steer-only resume, and state transition comms events
 progress:
   total_phases: 10
   completed_phases: 6
-  total_plans: 25
-  completed_plans: 25
+  total_plans: 26
+  completed_plans: 26
   percent: 100
 ---
 
@@ -72,6 +72,7 @@ Progress: [██████████] 100%
 | Phase 06 P02 | 7 | 2 tasks | 6 files |
 | Phase 06 P03 | 8 | 2 tasks | 2 files |
 | Phase 06-approval-gates P04 | 10 | 3 tasks | 5 files |
+| Phase 06-approval-gates P05 | 5 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -127,6 +128,7 @@ Recent decisions affecting current work:
 - [Phase 06]: approval panel appended below main card content area, not an absolute overlay — consistent with permission hook pattern
 - [Phase 06]: deadline_at computed in template as started_at + timeout_ms so JS hook reads a single data attribute
 - [Phase 06]: JS.toggle used for Approve w/ Context and Deny textarea expansion — no round-trip to server required
+- [Phase 06-approval-gates]: leader_approval_pending passed as named assign to MissionControlPanelComponent; banner before concierge section; countdown timer id scoped to gate_id to avoid hook id collisions
 
 ### Pending Todos
 
@@ -141,6 +143,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-08T19:03:45.778Z
-Stopped at: Completed 06-04-PLAN.md
+Last session: 2026-03-08T19:23:27.392Z
+Stopped at: Completed 06-05-PLAN.md
 Resume file: None
