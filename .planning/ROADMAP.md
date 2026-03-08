@@ -181,7 +181,13 @@ Plans:
   3. If remaining team budget is below the threshold for the planned sub-tree, the spawn is blocked and the leader is notified even without human intervention
   4. The max-agents-per-team and max-nesting-depth limits are enforced server-side and surfaced in the UI as a warning when the leader approaches them
   5. Auto-approve mode (for power users who trust the leader) can be toggled on — in this mode, spawns proceed if within budget without waiting for human input
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 09-01-PLAN.md — Wave 0: failing test stubs for agent spawn gate and workspace_live spawn gate handlers
+- [ ] 09-02-PLAN.md — Backend: spawn signals, agent.ex intercept with budget check and auto-approve, TeamBroadcaster critical types
+- [ ] 09-03-PLAN.md — LiveView: approve_spawn / deny_spawn / toggle_auto_approve_spawns event handlers and signal handle_info
+- [ ] 09-04-PLAN.md — UI: AgentCardComponent spawn gate panel, format_roles helper, human visual verification
 
 ### Phase 10: Leader Research Protocol
 **Goal**: The leader agent follows a multi-step research protocol — spawning research sub-agents, synthesizing their findings, and then posing an informed question to the human — rather than asking humans prematurely
@@ -207,7 +213,7 @@ Plans:
 | 6. Approval Gates | 5/5 | Complete   | 2026-03-08 |
 | 7. Confidence Triggers | 4/4 | Complete   | 2026-03-08 |
 | 8. Dynamic Tree Visibility | 4/5 | In Progress|  |
-| 9. Spawn Safety | 0/TBD | Not started | - |
+| 9. Spawn Safety | 0/4 | Not started | - |
 | 10. Leader Research Protocol | 0/TBD | Not started | - |
 
 ---
