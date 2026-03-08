@@ -379,6 +379,7 @@ defmodule Loomkin.Teams.Agent do
           state
           | paused_state: nil,
             pause_requested: false,
+            pause_queued: false,
             pending_updates: [],
             priority_queue: []
         }
@@ -679,28 +680,55 @@ defmodule Loomkin.Teams.Agent do
           Loomkin.Permissions.Manager.grant(to_string(tool_name), tool_path, state.session_id)
         end
 
-        # Resume in a task to avoid blocking the GenServer
-        agent_pid = self()
-        messages = state.messages
-        team_id = state.team_id
-
-        Task.Supervisor.start_child(Loomkin.Teams.TaskSupervisor, fn ->
-          tool_result =
-            if action in ["allow_once", "allow_always"] do
-              pd = pending_info.pending_data
-              # Refresh project_path in the tool context before re-executing
-              fresh_path = resolve_project_path(team_id, pd.context[:project_path])
-              context = Map.put(pd.context, :project_path, fresh_path)
-              AgentLoop.default_run_tool(pd.tool_module, pd.tool_args, context)
+        if state.pause_queued do
+          # Pause was queued while waiting for permission -- transition to paused
+          denial_context =
+            if action not in ["allow_once", "allow_always"] do
+              %{denied_tool: tool_name, denied_path: tool_path}
             else
-              "Error: Permission denied for #{tool_name}"
+              nil
             end
 
-          result = AgentLoop.resume(tool_result, pending_info, messages)
-          send(agent_pid, {:loop_resumed, result})
-        end)
+          paused_state = %{
+            messages: state.messages,
+            iteration: nil,
+            reason: :user_requested,
+            cancelled_permission: denial_context
+          }
 
-        {:noreply, %{state | pending_permission: nil}}
+          state = %{
+            state
+            | pending_permission: nil,
+              pause_queued: false,
+              paused_state: paused_state
+          }
+
+          state = set_status_and_broadcast(state, :paused)
+          {:noreply, state}
+        else
+          # Resume in a task to avoid blocking the GenServer
+          agent_pid = self()
+          messages = state.messages
+          team_id = state.team_id
+
+          Task.Supervisor.start_child(Loomkin.Teams.TaskSupervisor, fn ->
+            tool_result =
+              if action in ["allow_once", "allow_always"] do
+                pd = pending_info.pending_data
+                # Refresh project_path in the tool context before re-executing
+                fresh_path = resolve_project_path(team_id, pd.context[:project_path])
+                context = Map.put(pd.context, :project_path, fresh_path)
+                AgentLoop.default_run_tool(pd.tool_module, pd.tool_args, context)
+              else
+                "Error: Permission denied for #{tool_name}"
+              end
+
+            result = AgentLoop.resume(tool_result, pending_info, messages)
+            send(agent_pid, {:loop_resumed, result})
+          end)
+
+          {:noreply, %{state | pending_permission: nil}}
+        end
     end
   end
 
@@ -2392,6 +2420,23 @@ defmodule Loomkin.Teams.Agent do
       agent_name: to_string(agent_name),
       team_id: state.team_id,
       status: status
+    })
+    |> Loomkin.Signals.Extensions.Causality.attach(
+      team_id: state.team_id,
+      agent_name: to_string(agent_name)
+    )
+    |> Loomkin.Signals.publish()
+  rescue
+    _ ->
+      :ok
+  end
+
+  defp broadcast_team(state, {:agent_pause_queued, agent_name}) do
+    # Reuse agent_status signal to notify that pause has been queued
+    Loomkin.Signals.Agent.Status.new!(%{
+      agent_name: to_string(agent_name),
+      team_id: state.team_id,
+      status: :pause_queued
     })
     |> Loomkin.Signals.Extensions.Causality.attach(
       team_id: state.team_id,
