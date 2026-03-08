@@ -927,6 +927,14 @@ defmodule LoomkinWeb.WorkspaceLive do
 
   # --- Component Info Messages ---
 
+  # Forwarded from TeamTreeComponent — same logic as "switch_team" event handler
+  def handle_info({:switch_team, team_id}, socket) do
+    bindings = load_channel_bindings(team_id)
+
+    {:noreply,
+     assign(socket, active_team_id: team_id, channel_bindings: bindings, reply_target: nil)}
+  end
+
   def handle_info({:reply_to_agent, agent_name}, socket) do
     # Forwarded from roster component — same logic as the event handler
     agents = socket.assigns.cached_agents
@@ -2831,20 +2839,15 @@ defmodule LoomkinWeb.WorkspaceLive do
               {length(@cached_agents)}
             </span>
           </div>
-          <select
-            :if={@team_tree != %{}}
-            phx-change="switch_team"
-            name="team-id"
-            class="max-w-[8rem] truncate text-[11px] rounded-md px-1.5 py-0.5 focus:outline-none bg-surface-2 border border-subtle text-secondary"
-          >
-            <option
-              :for={tid <- [@team_id | Map.values(@team_tree) |> List.flatten()]}
-              value={tid}
-              selected={tid == @active_team_id}
-            >
-              {short_team_id(tid)}
-            </option>
-          </select>
+          <.live_component
+            module={LoomkinWeb.TeamTreeComponent}
+            id="team-tree"
+            team_tree={@team_tree}
+            root_team_id={@team_id}
+            active_team_id={@active_team_id}
+            agent_counts={compute_agent_counts(@cached_agents)}
+            team_names={@team_names}
+          />
         </div>
 
         <%!-- Spacer --%>
@@ -4348,8 +4351,13 @@ defmodule LoomkinWeb.WorkspaceLive do
 
   # agent_picker_dot_class/1, agent_color/1 moved to ComposerComponent
 
-  defp short_team_id(id) when is_binary(id), do: String.slice(id, 0, 8)
-  defp short_team_id(_), do: "?"
+  # Accepts a list of agent structs (cached_agents) — groups by team_id for per-team counts
+  defp compute_agent_counts(agents) when is_list(agents) do
+    Enum.group_by(agents, & &1.team_id)
+    |> Map.new(fn {team_id, team_agents} -> {team_id, length(team_agents)} end)
+  end
+
+  defp compute_agent_counts(_), do: %{}
 
   # format_agent_role/1 moved to MissionControlPanelComponent
 
