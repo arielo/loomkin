@@ -326,6 +326,13 @@ defmodule Loomkin.Teams.Agent do
     {:reply, :ok, %{state | paused_state: updated_ps}}
   end
 
+  # Completed or errored agents (e.g., orienter after auto-orient) ignore broadcasts
+  @impl true
+  def handle_call({:inject_broadcast, _text}, _from, %{status: status} = state)
+      when status in [:complete, :error] do
+    {:reply, :ok, state}
+  end
+
   # For non-paused agents, delegate to send_message
   @impl true
   def handle_call({:inject_broadcast, text}, from, state) do
@@ -1039,10 +1046,16 @@ defmodule Loomkin.Teams.Agent do
         state = %{state | loop_task: nil}
 
         status =
-          if reason in [:normal, :shutdown] do
-            :idle
-          else
-            :error
+          cond do
+            reason in [:normal, :shutdown] ->
+              :idle
+
+            # Orienter auto-orient is best-effort (no caller); failure is non-critical
+            state.role == :orienter and from == nil ->
+              :complete
+
+            true ->
+              :error
           end
 
         state = set_status_and_broadcast(state, status)

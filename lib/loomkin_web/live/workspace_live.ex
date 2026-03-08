@@ -228,11 +228,15 @@ defmodule LoomkinWeb.WorkspaceLive do
         socket
       end
 
-    # Load existing history
+    # Load existing history — fall back to DB if session process is not running
     messages =
       case Session.get_history(session_id) do
-        {:ok, msgs} -> msgs
-        _ -> []
+        {:ok, msgs} ->
+          msgs
+
+        _ ->
+          Loomkin.Session.Persistence.load_messages(session_id)
+          |> Enum.map(&Map.take(&1, [:role, :content, :session_id, :inserted_at]))
       end
 
     session_metrics = Loomkin.Telemetry.Metrics.session_metrics(session_id)

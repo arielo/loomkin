@@ -85,29 +85,62 @@ Hooks.ShiftEnterSubmit = {
 }
 
 // ScrollToBottom: auto-scrolls container to bottom when content updates (only if near bottom)
+// Shows a "New messages" indicator button when content arrives while scrolled up.
 Hooks.ScrollToBottom = {
   mounted() {
-    this.scrollToBottom()
-    this.observer = new MutationObserver(() => this.maybeScrollToBottom())
+    this.isAtBottom = true
+
+    this.el.addEventListener("scroll", () => {
+      this.isAtBottom = this.nearBottom()
+      if (this.isAtBottom) this.hideIndicator()
+    })
+
+    this.observer = new MutationObserver(() => {
+      if (this.isAtBottom) {
+        this.scrollToBottom()
+      } else {
+        this.showIndicator()
+      }
+    })
     this.observer.observe(this.el, { childList: true, subtree: true })
+
+    const indicator = this.getIndicator()
+    if (indicator) {
+      indicator.addEventListener("click", () => {
+        this.scrollToBottom()
+        this.hideIndicator()
+      })
+    }
+
+    this.scrollToBottom()
   },
   updated() {
-    this.maybeScrollToBottom()
+    if (this.isAtBottom) this.scrollToBottom()
   },
   destroyed() {
     if (this.observer) this.observer.disconnect()
   },
-  isNearBottom() {
+  nearBottom() {
     const threshold = 100
     return this.el.scrollHeight - this.el.scrollTop - this.el.clientHeight < threshold
   },
-  maybeScrollToBottom() {
-    if (this.isNearBottom()) {
-      this.scrollToBottom()
-    }
-  },
   scrollToBottom() {
     this.el.scrollTop = this.el.scrollHeight
+  },
+  getIndicator() {
+    return this.el.parentElement.querySelector("[data-scroll-indicator]")
+  },
+  showIndicator() {
+    const el = this.getIndicator()
+    if (!el) return
+    el.classList.remove("opacity-0", "pointer-events-none")
+    el.classList.add("opacity-100")
+  },
+  hideIndicator() {
+    const el = this.getIndicator()
+    if (!el) return
+    el.classList.remove("opacity-100")
+    el.classList.add("opacity-0", "pointer-events-none")
   }
 }
 
