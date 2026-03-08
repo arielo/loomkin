@@ -712,6 +712,50 @@ defmodule LoomkinWeb.WorkspaceLive do
     end
   end
 
+  # --- Approval Gate ---
+
+  def handle_event(
+        "approve_card_agent",
+        %{"gate-id" => gate_id, "agent" => agent_name} = params,
+        socket
+      ) do
+    context =
+      case params["context"] do
+        nil -> nil
+        "" -> nil
+        v -> v
+      end
+
+    send_approval_response(gate_id, %{outcome: :approved, context: context})
+    socket = update_agent_card(socket, agent_name, %{pending_approval: nil})
+    {:noreply, socket}
+  end
+
+  def handle_event(
+        "deny_card_agent",
+        %{"gate-id" => gate_id, "agent" => agent_name} = params,
+        socket
+      ) do
+    reason =
+      case params["reason"] do
+        nil -> nil
+        "" -> nil
+        v -> v
+      end
+
+    send_approval_response(gate_id, %{outcome: :denied, reason: reason, context: nil})
+    socket = update_agent_card(socket, agent_name, %{pending_approval: nil})
+
+    socket =
+      if socket.assigns.leader_approval_pending[:gate_id] == gate_id do
+        assign(socket, leader_approval_pending: nil)
+      else
+        socket
+      end
+
+    {:noreply, socket}
+  end
+
   # Agent card actions now forwarded via {:mission_control_event, ...}
   # Queue drawer toggle now forwarded via {:composer_event, ...}
 
@@ -4179,6 +4223,16 @@ defmodule LoomkinWeb.WorkspaceLive do
     case Registry.lookup(Loomkin.Teams.AgentRegistry, {:ask_user, question_id}) do
       [{pid, _}] ->
         send(pid, {:ask_user_answer, question_id, answer})
+
+      [] ->
+        :ok
+    end
+  end
+
+  defp send_approval_response(gate_id, decision) do
+    case Registry.lookup(Loomkin.Teams.AgentRegistry, {:approval_gate, gate_id}) do
+      [{pid, _}] ->
+        send(pid, {:approval_response, gate_id, decision})
 
       [] ->
         :ok

@@ -11,7 +11,6 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
     test "routes approval response to blocking tool task via Registry" do
       gate_id = "gate-001"
       agent_name = "worker-agent"
-      test_pid = self()
 
       # Register this test process as the "tool task" in the AgentRegistry
       {:ok, _} =
@@ -30,7 +29,6 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
       assert_receive {:approval_response, ^gate_id, %{outcome: :approved, context: "looks good"}}
 
       Registry.unregister(Loomkin.Teams.AgentRegistry, {:approval_gate, gate_id})
-      _ = test_pid
     end
 
     test "normalizes empty context string to nil" do
@@ -161,13 +159,16 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
       {:ok, _} =
         Registry.register(Loomkin.Teams.AgentRegistry, {:approval_gate, gate_id}, %{})
 
+      started_at = System.monotonic_time(:millisecond)
+
       socket =
-        build_test_socket(agent_name: agent_name, gate_id: gate_id)
-        |> Phoenix.LiveView.assign(
+        build_test_socket(
+          agent_name: agent_name,
+          gate_id: gate_id,
           leader_approval_pending: %{
             gate_id: gate_id,
             timeout_ms: 300_000,
-            started_at: System.monotonic_time(:millisecond)
+            started_at: started_at
           }
         )
 
@@ -195,18 +196,7 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
 
       signal = approval_requested_signal(gate_id, agent_name, "Should I proceed?", 300_000)
 
-      socket =
-        build_test_socket(agent_name: agent_name, gate_id: nil)
-        |> Phoenix.LiveView.assign(
-          agent_cards: %{
-            agent_name => %{
-              name: agent_name,
-              role: :lead,
-              status: :working,
-              pending_approval: nil
-            }
-          }
-        )
+      socket = build_test_socket(agent_name: agent_name, gate_id: nil, agent_role: :lead)
 
       {:noreply, updated_socket} = WorkspaceLive.handle_info(signal, socket)
 
@@ -220,18 +210,7 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
 
       signal = approval_requested_signal(gate_id, agent_name, "Should I delete?", 300_000)
 
-      socket =
-        build_test_socket(agent_name: agent_name, gate_id: nil)
-        |> Phoenix.LiveView.assign(
-          agent_cards: %{
-            agent_name => %{
-              name: agent_name,
-              role: :peer,
-              status: :working,
-              pending_approval: nil
-            }
-          }
-        )
+      socket = build_test_socket(agent_name: agent_name, gate_id: nil, agent_role: :peer)
 
       {:noreply, updated_socket} = WorkspaceLive.handle_info(signal, socket)
 
@@ -245,13 +224,7 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
 
       signal = approval_requested_signal(gate_id, agent_name, question, 300_000)
 
-      socket =
-        build_test_socket(agent_name: agent_name, gate_id: nil)
-        |> Phoenix.LiveView.assign(
-          agent_cards: %{
-            agent_name => %{name: agent_name, role: :peer, status: :working}
-          }
-        )
+      socket = build_test_socket(agent_name: agent_name, gate_id: nil)
 
       {:noreply, updated_socket} = WorkspaceLive.handle_info(signal, socket)
 
@@ -265,11 +238,7 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
 
       signal = approval_requested_signal(gate_id, agent_name, "Proceed?", 300_000)
 
-      socket =
-        build_test_socket(agent_name: agent_name, gate_id: nil)
-        |> Phoenix.LiveView.assign(
-          agent_cards: %{agent_name => %{name: agent_name, role: :peer, status: :working}}
-        )
+      socket = build_test_socket(agent_name: agent_name, gate_id: nil)
 
       {:noreply, updated_socket} = WorkspaceLive.handle_info(signal, socket)
 
@@ -285,20 +254,14 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
       started_at = System.monotonic_time(:millisecond)
 
       socket =
-        build_test_socket(agent_name: agent_name, gate_id: nil)
-        |> Phoenix.LiveView.assign(
+        build_test_socket(
+          agent_name: agent_name,
+          gate_id: gate_id,
+          agent_role: :lead,
           leader_approval_pending: %{
             gate_id: gate_id,
             timeout_ms: 300_000,
             started_at: started_at
-          },
-          agent_cards: %{
-            agent_name => %{
-              name: agent_name,
-              role: :lead,
-              status: :working,
-              pending_approval: %{gate_id: gate_id, question: "ok?"}
-            }
           }
         )
 
@@ -313,19 +276,7 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
 
       signal = approval_resolved_signal(gate_id, agent_name, :denied)
 
-      socket =
-        build_test_socket(agent_name: agent_name, gate_id: nil)
-        |> Phoenix.LiveView.assign(
-          leader_approval_pending: nil,
-          agent_cards: %{
-            agent_name => %{
-              name: agent_name,
-              role: :peer,
-              status: :working,
-              pending_approval: %{gate_id: gate_id, question: "proceed?"}
-            }
-          }
-        )
+      socket = build_test_socket(agent_name: agent_name, gate_id: gate_id)
 
       {:noreply, updated_socket} = WorkspaceLive.handle_info(signal, socket)
 
@@ -339,12 +290,7 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
 
       signal = approval_resolved_signal(gate_id, agent_name, :timeout)
 
-      socket =
-        build_test_socket(agent_name: agent_name, gate_id: nil)
-        |> Phoenix.LiveView.assign(
-          leader_approval_pending: nil,
-          agent_cards: %{agent_name => %{name: agent_name, role: :peer, status: :working}}
-        )
+      socket = build_test_socket(agent_name: agent_name, gate_id: nil)
 
       {:noreply, updated_socket} = WorkspaceLive.handle_info(signal, socket)
 
@@ -390,9 +336,12 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
   end
 
   # Build a minimal Phoenix.LiveView.Socket with approval-relevant assigns.
+  # All state is embedded in the assigns map directly (no post-construction assign calls).
   defp build_test_socket(opts) do
     agent_name = Keyword.get(opts, :agent_name, "test-agent")
     gate_id = Keyword.get(opts, :gate_id)
+    agent_role = Keyword.get(opts, :agent_role, :peer)
+    leader_approval_pending = Keyword.get(opts, :leader_approval_pending, nil)
 
     pending_approval =
       if gate_id do
@@ -412,11 +361,12 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
         live_action: :show,
         team_id: "team-test",
         active_team_id: "team-test",
-        leader_approval_pending: nil,
+        leader_approval_pending: leader_approval_pending,
+        cached_agents: [],
         agent_cards: %{
           agent_name => %{
             name: agent_name,
-            role: :peer,
+            role: agent_role,
             status: :working,
             pending_approval: pending_approval
           }
