@@ -398,6 +398,101 @@ defmodule LoomkinWeb.AgentCardComponent do
           </span>
         </div>
       </div>
+
+      <%!-- Approval panel — visible when status is :approval_pending and pending_approval is set --%>
+      <div
+        :if={@card.status == :approval_pending && @card[:pending_approval]}
+        class="border-t border-violet-500/30 bg-violet-950/20 px-4 py-3 flex flex-col gap-2"
+      >
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-[11px] font-semibold text-violet-400">Approval required</span>
+          <span
+            id={"countdown-#{@card.name}"}
+            phx-hook="CountdownTimer"
+            data-deadline-at={
+              @card[:pending_approval][:started_at] + @card[:pending_approval][:timeout_ms]
+            }
+            class="text-[10px] font-mono text-violet-300/70 tabular-nums"
+          >
+            --:--
+          </span>
+        </div>
+
+        <p class="text-xs text-zinc-300 leading-relaxed">
+          {@card[:pending_approval][:question]}
+        </p>
+
+        <%!-- Three-button row --%>
+        <div class="flex items-center gap-1.5 mt-1">
+          <button
+            phx-click="approve_card_agent"
+            phx-value-gate-id={@card[:pending_approval][:gate_id]}
+            phx-value-agent={@card.name}
+            phx-value-context=""
+            class="px-3 py-1.5 text-[11px] font-medium rounded bg-violet-600/80 hover:bg-violet-600 text-white border border-violet-500/50 transition-colors cursor-pointer"
+          >
+            Approve
+          </button>
+          <button
+            phx-click={JS.toggle(to: "#approve-ctx-#{@card.name}")}
+            type="button"
+            class="px-3 py-1.5 text-[11px] font-medium rounded bg-violet-800/60 hover:bg-violet-700/60 text-violet-200 border border-violet-600/30 transition-colors cursor-pointer"
+          >
+            Approve w/ Context
+          </button>
+          <button
+            phx-click={JS.toggle(to: "#deny-ctx-#{@card.name}")}
+            type="button"
+            class="px-3 py-1.5 text-[11px] font-medium rounded bg-rose-900/40 hover:bg-rose-800/50 text-rose-300 border border-rose-700/30 transition-colors cursor-pointer"
+          >
+            Deny
+          </button>
+        </div>
+
+        <%!-- Approve w/ Context form (hidden by default) --%>
+        <form
+          id={"approve-ctx-#{@card.name}"}
+          phx-submit="approve_card_agent"
+          class="hidden flex-col gap-1.5 mt-1"
+        >
+          <textarea
+            name="context"
+            rows="2"
+            placeholder="Optional context for the agent..."
+            class="w-full text-xs bg-zinc-900/60 border border-violet-500/30 rounded px-2 py-1.5 text-zinc-200 placeholder-zinc-500 resize-none focus:outline-none focus:border-violet-400/60"
+          ></textarea>
+          <input type="hidden" name="gate-id" value={@card[:pending_approval][:gate_id]} />
+          <input type="hidden" name="agent" value={@card.name} />
+          <button
+            type="submit"
+            class="self-start px-3 py-1 text-[11px] font-medium rounded bg-violet-600/80 hover:bg-violet-600 text-white border border-violet-500/50 transition-colors cursor-pointer"
+          >
+            Send Approval
+          </button>
+        </form>
+
+        <%!-- Deny form (hidden by default) --%>
+        <form
+          id={"deny-ctx-#{@card.name}"}
+          phx-submit="deny_card_agent"
+          class="hidden flex-col gap-1.5 mt-1"
+        >
+          <textarea
+            name="reason"
+            rows="2"
+            placeholder="Reason for denial (optional)..."
+            class="w-full text-xs bg-zinc-900/60 border border-rose-700/30 rounded px-2 py-1.5 text-zinc-200 placeholder-zinc-500 resize-none focus:outline-none focus:border-rose-600/50"
+          ></textarea>
+          <input type="hidden" name="gate-id" value={@card[:pending_approval][:gate_id]} />
+          <input type="hidden" name="agent" value={@card.name} />
+          <button
+            type="submit"
+            class="self-start px-3 py-1 text-[11px] font-medium rounded bg-rose-900/50 hover:bg-rose-800/60 text-rose-300 border border-rose-700/30 transition-colors cursor-pointer"
+          >
+            Confirm Denial
+          </button>
+        </form>
+      </div>
     </div>
     """
   end
@@ -409,7 +504,7 @@ defmodule LoomkinWeb.AgentCardComponent do
   defp card_state_class(:streaming, _status), do: "card-streaming"
   defp card_state_class(_content_type, :paused), do: "agent-card-paused"
   defp card_state_class(_content_type, :blocked), do: "agent-card-blocked"
-  defp card_state_class(_content_type, :approval_pending), do: "agent-card-blocked"
+  defp card_state_class(_content_type, :approval_pending), do: "agent-card-approval"
   defp card_state_class(_content_type, :error), do: "card-error"
   defp card_state_class(_content_type, :crashed), do: "card-error"
   defp card_state_class(_content_type, :recovering), do: "card-error"
@@ -438,7 +533,7 @@ defmodule LoomkinWeb.AgentCardComponent do
   defp status_dot_class(:paused), do: "bg-blue-400 animate-pulse"
   defp status_dot_class(:error), do: "bg-red-400 agent-dot-error"
   defp status_dot_class(:waiting_permission), do: "bg-amber-400 agent-dot-thinking"
-  defp status_dot_class(:approval_pending), do: "bg-amber-400 agent-dot-thinking"
+  defp status_dot_class(:approval_pending), do: "bg-violet-500 animate-pulse"
   defp status_dot_class(:complete), do: "bg-emerald-400"
   defp status_dot_class(:crashed), do: "bg-red-500 animate-pulse"
   defp status_dot_class(:recovering), do: "bg-amber-400 animate-pulse"

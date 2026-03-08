@@ -84,8 +84,23 @@ defmodule LoomkinWeb.Live.AgentCardComponentTest do
       # When the card has a pending_approval assign (gate_id, question, timeout_ms),
       # the expanded approval panel section should be visible with question text
       # and approve/deny action buttons.
-      # Will fail until Plan 04 implements the approval panel in agent_card_component.
-      flunk("not implemented")
+      pending_approval = %{
+        gate_id: "gate-abc123",
+        question: "Should I deploy to production?",
+        timeout_ms: 300_000,
+        started_at: System.system_time(:millisecond)
+      }
+
+      html = render_card(%{status: :approval_pending, pending_approval: pending_approval})
+
+      assert html =~ "Approval required"
+      assert html =~ "Should I deploy to production?"
+      assert html =~ "approve_card_agent"
+      assert html =~ "deny_card_agent"
+      assert html =~ "Approve"
+      assert html =~ "Deny"
+      assert html =~ "Approve w/ Context"
+      assert html =~ "CountdownTimer"
     end
 
     test "card_state_class for :approval_pending uses agent-card-approval not agent-card-blocked" do

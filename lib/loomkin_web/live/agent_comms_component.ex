@@ -156,6 +156,18 @@ defmodule LoomkinWeb.AgentCommsComponent do
       accent_border: "rgba(239, 68, 68, 0.30)",
       accent_text: "#fca5a5",
       accent_bg: "rgba(239, 68, 68, 0.08)"
+    },
+    approval_gate_requested: %{
+      icon: "🔐",
+      accent_border: "rgba(124, 58, 237, 0.40)",
+      accent_text: "#a78bfa",
+      accent_bg: "rgba(124, 58, 237, 0.12)"
+    },
+    approval_gate_resolved: %{
+      icon: "✔",
+      accent_border: "rgba(124, 58, 237, 0.30)",
+      accent_text: "#8b5cf6",
+      accent_bg: "rgba(124, 58, 237, 0.08)"
     }
   }
 
