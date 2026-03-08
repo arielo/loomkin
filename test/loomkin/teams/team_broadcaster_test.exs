@@ -108,6 +108,32 @@ defmodule Loomkin.Teams.TeamBroadcasterTest do
     end
   end
 
+  describe "child team created critical classification" do
+    test "team.child.created is classified as critical" do
+      broadcaster = start_broadcaster()
+      TeamBroadcaster.subscribe(broadcaster, self())
+
+      signal = %Jido.Signal{
+        id: Jido.Signal.ID.generate(),
+        type: "team.child.created",
+        source: "/test",
+        data: %{
+          team_id: "child-team-1",
+          parent_team_id: @team_id,
+          team_name: "child-team",
+          depth: 1
+        },
+        datacontenttype: "application/json",
+        specversion: "1.0.1"
+      }
+
+      Signals.publish(signal)
+
+      assert_receive {:team_broadcast, %{critical: [received]}}, 50
+      assert received.type == "team.child.created"
+    end
+  end
+
   describe "approval gate critical classification" do
     test "agent.approval.requested is classified as critical" do
       # This test fails until Plan 02 adds "agent.approval.requested" to @critical_types

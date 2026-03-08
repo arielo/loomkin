@@ -34,6 +34,7 @@ defmodule Loomkin.Teams.TeamBroadcaster do
                     "team.permission.request",
                     "team.ask_user.question",
                     "team.ask_user.answered",
+                    "team.child.created",
                     "agent.error",
                     "agent.escalation",
                     "team.dissolved",
@@ -172,6 +173,11 @@ defmodule Loomkin.Teams.TeamBroadcaster do
   end
 
   # -- Private helpers --
+
+  defp extract_team_id(%Jido.Signal{type: "team.child.created"} = signal) do
+    # Route by parent team (already registered) rather than the new child team
+    get_in(signal.data, [:parent_team_id])
+  end
 
   defp extract_team_id(%Jido.Signal{} = signal) do
     get_in(signal.data, [:team_id]) ||
