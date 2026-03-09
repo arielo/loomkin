@@ -20,6 +20,11 @@ defmodule Loomkin.Teams.AgentStateMachineTest do
     %{pid: pid, team_id: team_id, name: name, role: role}
   end
 
+  # Build a minimal Task struct with a known ref for injecting into loop_task state.
+  # Task enforces :mfa so we provide a no-op placeholder.
+  defp fake_task(ref),
+    do: struct!(Task, ref: ref, pid: self(), owner: self(), mfa: {Kernel, :send, []})
+
   describe "pause_queued field" do
     test "defaults to false in struct" do
       %{pid: pid} = start_agent()
@@ -196,6 +201,122 @@ defmodule Loomkin.Teams.AgentStateMachineTest do
       # Must still be :waiting_permission, not :paused
       assert state.status == :waiting_permission
       assert state.pause_queued == true
+    end
+  end
+
+  # Issue #19: pause_queued → :paused after approval_pending gate resolves.
+  # The spawn gate tool task returns {:loop_ok, ...} or {:loop_error, ...} when
+  # the gate resolves. maybe_apply_queued_pause/2 checks pause_queued at that
+  # point and overrides :idle → :paused if needed.
+  describe "pause_queued after approval_pending resolves" do
+    test "agent transitions to :paused instead of :idle when pause_queued is true at loop_ok" do
+      %{pid: pid} = start_agent()
+
+      fake_ref = make_ref()
+
+      :sys.replace_state(pid, fn s ->
+        %{
+          s
+          | status: :approval_pending,
+            pause_queued: true,
+            loop_task: {fake_task(fake_ref), nil}
+        }
+      end)
+
+      # Send the fake loop_ok message — simulates spawn gate resolving and loop completing.
+      send(pid, {fake_ref, {:loop_ok, "done", [], %{}}})
+      :timer.sleep(100)
+
+      state = :sys.get_state(pid)
+      assert state.status == :paused
+      assert state.pause_queued == false
+      assert state.paused_state != nil
+      assert state.paused_state.reason == :user_requested
+    end
+
+    test "agent transitions to :paused instead of :idle when pause_queued is true at loop_error" do
+      %{pid: pid} = start_agent()
+
+      fake_ref = make_ref()
+
+      :sys.replace_state(pid, fn s ->
+        %{
+          s
+          | status: :approval_pending,
+            pause_queued: true,
+            loop_task: {fake_task(fake_ref), nil}
+        }
+      end)
+
+      send(pid, {fake_ref, {:loop_error, :some_error, []}})
+      :timer.sleep(100)
+
+      state = :sys.get_state(pid)
+      assert state.status == :paused
+      assert state.pause_queued == false
+      assert state.paused_state != nil
+      assert state.paused_state.reason == :user_requested
+    end
+
+    test "agent goes to :idle normally when pause_queued is false at loop_ok" do
+      %{pid: pid} = start_agent()
+
+      fake_ref = make_ref()
+
+      :sys.replace_state(pid, fn s ->
+        %{
+          s
+          | status: :approval_pending,
+            pause_queued: false,
+            loop_task: {fake_task(fake_ref), nil}
+        }
+      end)
+
+      send(pid, {fake_ref, {:loop_ok, "done", [], %{}}})
+      :timer.sleep(100)
+
+      state = :sys.get_state(pid)
+      assert state.status == :idle
+      assert state.pause_queued == false
+      assert state.paused_state == nil
+    end
+  end
+
+  # Issue #20: force_pause/1 must return {:error, :not_waiting_permission} for
+  # any state other than :waiting_permission — documenting intentional behavior.
+  describe "force_pause: non-waiting_permission states" do
+    test "returns {:error, :not_waiting_permission} when agent is :idle" do
+      %{pid: pid} = start_agent()
+
+      state = :sys.get_state(pid)
+      assert state.status == :idle
+
+      result = Agent.force_pause(pid)
+      assert result == {:error, :not_waiting_permission}
+    end
+
+    test "returns {:error, :not_waiting_permission} when agent is :working" do
+      %{pid: pid} = start_agent()
+
+      :sys.replace_state(pid, fn s -> %{s | status: :working} end)
+
+      result = Agent.force_pause(pid)
+      assert result == {:error, :not_waiting_permission}
+    end
+
+    test "returns {:error, :not_waiting_permission} when agent is :paused" do
+      %{pid: pid} = start_agent()
+
+      :sys.replace_state(pid, fn s ->
+        %{
+          s
+          | status: :paused,
+            paused_state: %{messages: [], iteration: nil, reason: :user_requested}
+        }
+      end)
+
+      result = Agent.force_pause(pid)
+      assert result == {:error, :not_waiting_permission}
     end
   end
 end

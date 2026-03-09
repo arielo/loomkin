@@ -40,8 +40,16 @@ defmodule Loomkin.Tools.RequestApproval do
     gate_id = Ecto.UUID.generate()
 
     # Register the tool task process so the approval response can be routed back
-    Registry.register(Loomkin.Teams.AgentRegistry, {:approval_gate, gate_id}, self())
+    case Registry.register(Loomkin.Teams.AgentRegistry, {:approval_gate, gate_id}, self()) do
+      {:error, {:already_registered, _}} ->
+        {:error, "Approval gate already registered for this agent. Cannot open a second gate."}
 
+      _ ->
+        run_gate(gate_id, team_id, agent_name, question, timeout_ms)
+    end
+  end
+
+  defp run_gate(gate_id, team_id, agent_name, question, timeout_ms) do
     # Publish the approval request signal so LiveView renders the gate UI
     signal =
       Loomkin.Signals.Approval.Requested.new!(%{

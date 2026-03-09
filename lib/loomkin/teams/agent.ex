@@ -175,14 +175,9 @@ defmodule Loomkin.Teams.Agent do
     GenServer.call(pid, :get_state, timeout)
   end
 
-  @doc """
-  Change the role of this agent.
-
-  ## Options
-    * `:require_approval` - if true, sends approval request to team lead before changing (default: false)
-  """
-  def change_role(pid, new_role, opts \\ []) when is_pid(pid) do
-    GenServer.call(pid, {:change_role, new_role, opts}, :infinity)
+  @doc "Change the role of this agent."
+  def change_role(pid, new_role) when is_pid(pid) do
+    GenServer.call(pid, {:change_role, new_role}, :infinity)
   end
 
   # --- Callbacks ---
@@ -356,22 +351,8 @@ defmodule Loomkin.Teams.Agent do
   end
 
   @impl true
-  def handle_call({:change_role, new_role, opts}, _from, state) do
-    if opts[:require_approval] do
-      # Send approval request to lead and wait synchronously
-      request_id = Ecto.UUID.generate()
-
-      Comms.broadcast(
-        state.team_id,
-        {:role_change_request, state.name, state.role, new_role, request_id}
-      )
-
-      # For now, pending approval proceeds immediately — the lead can reject via PubSub
-      # A full interactive approval flow would require async state, which we avoid here.
-      do_change_role(state, new_role)
-    else
-      do_change_role(state, new_role)
-    end
+  def handle_call({:change_role, new_role}, _from, state) do
+    do_change_role(state, new_role)
   end
 
   @impl true
@@ -619,6 +600,19 @@ defmodule Loomkin.Teams.Agent do
           %{tool: p.tool_name, path: p.tool_path}
       end
 
+    # Shut down the orphaned task before clearing it to prevent stale messages
+    case state.loop_task do
+      {%Task{} = task, _from} ->
+        try do
+          Task.shutdown(task, :brutal_kill)
+        rescue
+          _ -> :ok
+        end
+
+      _ ->
+        :ok
+    end
+
     paused_state = %{
       messages: state.messages,
       iteration: nil,
@@ -738,6 +732,10 @@ defmodule Loomkin.Teams.Agent do
 
   def handle_call({:set_auto_approve_spawns, enabled}, _from, state) do
     {:reply, :ok, %{state | auto_approve_spawns: enabled}}
+  end
+
+  def handle_call(:is_gate_open?, _from, state) do
+    {:reply, state.status == :approval_pending, state}
   end
 
   def handle_call({:check_spawn_budget, estimated_cost}, _from, state) do
@@ -955,7 +953,7 @@ defmodule Loomkin.Teams.Agent do
           if task_id, do: Loomkin.Teams.Tasks.complete_task(task_id, text)
         end
 
-        {:noreply, drain_queues(state)}
+        {:noreply, drain_queues(maybe_apply_queued_pause(state, msgs))}
 
       _ ->
         {:noreply, state}
@@ -989,7 +987,7 @@ defmodule Loomkin.Teams.Agent do
           if task_id, do: Loomkin.Teams.Tasks.complete_task(task_id, text)
         end
 
-        {:noreply, drain_queues(state)}
+        {:noreply, drain_queues(maybe_apply_queued_pause(state, msgs))}
 
       _ ->
         {:noreply, state}
@@ -1019,7 +1017,7 @@ defmodule Loomkin.Teams.Agent do
           if task_id, do: Loomkin.Teams.Tasks.fail_task(task_id, inspect(reason))
         end
 
-        {:noreply, drain_queues(state)}
+        {:noreply, drain_queues(maybe_apply_queued_pause(state, msgs))}
 
       _ ->
         {:noreply, state}
@@ -1751,6 +1749,21 @@ defmodule Loomkin.Teams.Agent do
 
   # --- Private ---
 
+  # If a pause was queued during an approval gate, apply it now that the gate has resolved.
+  defp maybe_apply_queued_pause(%{pause_queued: true} = state, msgs) do
+    paused_state = %{
+      messages: msgs,
+      iteration: nil,
+      reason: :user_requested,
+      cancelled_permission: nil
+    }
+
+    state = %{state | pause_queued: false, pause_requested: false, paused_state: paused_state}
+    set_status_and_broadcast(state, :paused)
+  end
+
+  defp maybe_apply_queued_pause(state, _msgs), do: state
+
   defp do_change_role(state, new_role) do
     case Role.get(new_role) do
       {:ok, role_config} ->
@@ -2238,9 +2251,7 @@ defmodule Loomkin.Teams.Agent do
     estimated_cost = estimate_spawn_cost(roles)
 
     # Step 2: guard against double-gate
-    agent_state = :sys.get_state(agent_pid)
-
-    if agent_state.status == :approval_pending do
+    if GenServer.call(agent_pid, :is_gate_open?) do
       AgentLoop.format_tool_result(
         {:error, :approval_pending, %{message: "Agent already has an open approval gate"}}
       )
@@ -2256,7 +2267,15 @@ defmodule Loomkin.Teams.Agent do
 
           if auto_approve do
             # Step 6 directly: execute spawn
-            execute_spawn_and_notify(agent_pid, tool_module, tool_args, context, nil)
+            execute_spawn_and_notify(
+              agent_pid,
+              tool_module,
+              tool_args,
+              context,
+              nil,
+              team_id,
+              agent_name
+            )
           else
             run_human_spawn_gate(
               agent_pid,
@@ -2309,87 +2328,109 @@ defmodule Loomkin.Teams.Agent do
     GenServer.cast(agent_pid, {:open_spawn_gate, gate_id, pending_info})
 
     # Register this tool task process for response routing
-    Registry.register(Loomkin.Teams.AgentRegistry, {:spawn_gate, gate_id}, self())
+    case Registry.register(Loomkin.Teams.AgentRegistry, {:spawn_gate, gate_id}, self()) do
+      {:error, {:already_registered, _}} ->
+        AgentLoop.format_tool_result(
+          {:error, :already_registered,
+           %{message: "Spawn gate already registered. Cannot open a second gate."}}
+        )
 
-    # Publish GateRequested signal for LiveView to render the gate ui
-    signal =
-      Loomkin.Signals.Spawn.GateRequested.new!(%{
-        gate_id: gate_id,
-        agent_name: to_string(agent_name),
-        team_id: team_id,
-        team_name: team_name,
-        roles: roles,
-        estimated_cost: estimated_cost,
-        limit_warning: limit_warning,
-        timeout_ms: timeout_ms,
-        auto_approve_spawns: auto_approve
-      })
-
-    Loomkin.Signals.publish(signal)
-
-    receive do
-      {:spawn_gate_response, ^gate_id, %{outcome: :approved}} ->
-        Registry.unregister(Loomkin.Teams.AgentRegistry, {:spawn_gate, gate_id})
-        execute_spawn_and_notify(agent_pid, tool_module, tool_args, context, gate_id)
-
-      {:spawn_gate_response, ^gate_id, %{outcome: :denied, reason: reason}} ->
-        Registry.unregister(Loomkin.Teams.AgentRegistry, {:spawn_gate, gate_id})
-
-        resolved =
-          Loomkin.Signals.Spawn.GateResolved.new!(%{
+      _ ->
+        # Publish GateRequested signal for LiveView to render the gate ui
+        signal =
+          Loomkin.Signals.Spawn.GateRequested.new!(%{
             gate_id: gate_id,
             agent_name: to_string(agent_name),
             team_id: team_id,
-            outcome: :denied
+            team_name: team_name,
+            roles: roles,
+            estimated_cost: estimated_cost,
+            limit_warning: limit_warning,
+            timeout_ms: timeout_ms,
+            auto_approve_spawns: auto_approve
           })
 
-        Loomkin.Signals.publish(resolved)
+        Loomkin.Signals.publish(signal)
 
-        AgentLoop.format_tool_result(
-          {:ok,
-           %{
-             status: :denied,
-             reason: :human_denied,
-             message: reason || "Denied by human."
-           }}
-        )
-    after
-      timeout_ms ->
-        Registry.unregister(Loomkin.Teams.AgentRegistry, {:spawn_gate, gate_id})
+        receive do
+          {:spawn_gate_response, ^gate_id, %{outcome: :approved}} ->
+            Registry.unregister(Loomkin.Teams.AgentRegistry, {:spawn_gate, gate_id})
 
-        resolved =
-          Loomkin.Signals.Spawn.GateResolved.new!(%{
-            gate_id: gate_id,
-            agent_name: to_string(agent_name),
-            team_id: team_id,
-            outcome: :timeout
-          })
+            execute_spawn_and_notify(
+              agent_pid,
+              tool_module,
+              tool_args,
+              context,
+              gate_id,
+              team_id,
+              agent_name
+            )
 
-        Loomkin.Signals.publish(resolved)
+          {:spawn_gate_response, ^gate_id, %{outcome: :denied, reason: reason}} ->
+            Registry.unregister(Loomkin.Teams.AgentRegistry, {:spawn_gate, gate_id})
 
-        AgentLoop.format_tool_result(
-          {:ok,
-           %{
-             status: :denied,
-             reason: :timeout,
-             message: "Spawn gate timed out."
-           }}
-        )
+            resolved =
+              Loomkin.Signals.Spawn.GateResolved.new!(%{
+                gate_id: gate_id,
+                agent_name: to_string(agent_name),
+                team_id: team_id,
+                outcome: :denied
+              })
+
+            Loomkin.Signals.publish(resolved)
+
+            AgentLoop.format_tool_result(
+              {:ok,
+               %{
+                 status: :denied,
+                 reason: :human_denied,
+                 message: reason || "Denied by human."
+               }}
+            )
+        after
+          timeout_ms ->
+            Registry.unregister(Loomkin.Teams.AgentRegistry, {:spawn_gate, gate_id})
+
+            resolved =
+              Loomkin.Signals.Spawn.GateResolved.new!(%{
+                gate_id: gate_id,
+                agent_name: to_string(agent_name),
+                team_id: team_id,
+                outcome: :timeout
+              })
+
+            Loomkin.Signals.publish(resolved)
+
+            AgentLoop.format_tool_result(
+              {:ok,
+               %{
+                 status: :denied,
+                 reason: :timeout,
+                 message: "Spawn gate timed out."
+               }}
+            )
+        end
     end
   end
 
-  defp execute_spawn_and_notify(agent_pid, tool_module, tool_args, context, gate_id) do
+  defp execute_spawn_and_notify(
+         agent_pid,
+         tool_module,
+         tool_args,
+         context,
+         gate_id,
+         team_id,
+         agent_name
+       ) do
     result = AgentLoop.default_run_tool(tool_module, tool_args, context)
 
     if gate_id do
       # Publish GateResolved for approved path (human gate)
-      agent_state = :sys.get_state(agent_pid)
-
       resolved =
         Loomkin.Signals.Spawn.GateResolved.new!(%{
           gate_id: gate_id,
-          agent_name: to_string(agent_state.name),
-          team_id: agent_state.team_id,
+          agent_name: to_string(agent_name),
+          team_id: team_id,
           outcome: :approved
         })
 

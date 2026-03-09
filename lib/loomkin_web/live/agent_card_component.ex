@@ -34,7 +34,8 @@ defmodule LoomkinWeb.AgentCardComponent do
        rendered_content: "",
        prev_content: nil,
        prev_content_type: nil,
-       prev_focused: nil
+       prev_focused: nil,
+       capability_bars_data: []
      )}
   end
 
@@ -44,6 +45,7 @@ defmodule LoomkinWeb.AgentCardComponent do
 
     card = socket.assigns.card
     focused = socket.assigns.focused
+    team_id = socket.assigns.team_id
 
     new_content = card && card.latest_content
     new_content_type = card && card.content_type
@@ -65,6 +67,16 @@ defmodule LoomkinWeb.AgentCardComponent do
       else
         socket
       end
+
+    caps =
+      if team_id && card do
+        Loomkin.Teams.Capabilities.get_capabilities(team_id, card.name)
+        |> Enum.take(3)
+      else
+        []
+      end
+
+    socket = assign(socket, :capability_bars_data, caps)
 
     {:ok, socket}
   end
@@ -258,8 +270,7 @@ defmodule LoomkinWeb.AgentCardComponent do
         <%!-- Capability bars --%>
         <.capability_bars
           :if={@team_id && !@focused}
-          team_id={@team_id}
-          agent_name={@card.name}
+          caps={@capability_bars_data}
         />
 
         <%!-- Content area --%>
@@ -409,7 +420,7 @@ defmodule LoomkinWeb.AgentCardComponent do
             placeholder="Optional context for the agent..."
             class="w-full text-xs bg-zinc-900/60 border border-violet-500/30 rounded px-2 py-1.5 text-zinc-200 placeholder-zinc-500 resize-none focus:outline-none focus:border-violet-400/60"
           ></textarea>
-          <input type="hidden" name="gate-id" value={@card[:pending_approval][:gate_id]} />
+          <input type="hidden" name="gate_id" value={@card[:pending_approval][:gate_id]} />
           <input type="hidden" name="agent" value={@card.name} />
           <button
             type="submit"
@@ -431,7 +442,7 @@ defmodule LoomkinWeb.AgentCardComponent do
             placeholder="Reason for denial (optional)..."
             class="w-full text-xs bg-zinc-900/60 border border-rose-700/30 rounded px-2 py-1.5 text-zinc-200 placeholder-zinc-500 resize-none focus:outline-none focus:border-rose-600/50"
           ></textarea>
-          <input type="hidden" name="gate-id" value={@card[:pending_approval][:gate_id]} />
+          <input type="hidden" name="gate_id" value={@card[:pending_approval][:gate_id]} />
           <input type="hidden" name="agent" value={@card.name} />
           <button
             type="submit"
@@ -683,12 +694,6 @@ defmodule LoomkinWeb.AgentCardComponent do
   # --- Capability bars ---
 
   defp capability_bars(assigns) do
-    caps =
-      Loomkin.Teams.Capabilities.get_capabilities(assigns.team_id, assigns.agent_name)
-      |> Enum.take(3)
-
-    assigns = assign(assigns, :caps, caps)
-
     ~H"""
     <div :if={@caps != []} class="mt-1.5 flex items-center gap-3">
       <div
@@ -748,7 +753,7 @@ defmodule LoomkinWeb.AgentCardComponent do
 
   defp render_card_markdown(content) when is_binary(content) do
     doc =
-      MDEx.new(render: [unsafe_: true])
+      MDEx.new()
       |> MDEx.Document.put_markdown(content)
 
     case MDEx.to_html(doc) do

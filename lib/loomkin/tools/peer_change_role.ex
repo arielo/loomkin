@@ -13,11 +13,10 @@ defmodule Loomkin.Tools.PeerChangeRole do
         type: :string,
         required: true,
         doc: "New role name (lead, researcher, coder, reviewer, tester)"
-      ],
-      require_approval: [type: :boolean, doc: "If true, request lead approval before changing"]
+      ]
     ]
 
-  import Loomkin.Tool, only: [param!: 2, param: 3]
+  import Loomkin.Tool, only: [param!: 2]
 
   alias Loomkin.Teams.Manager
 
@@ -26,7 +25,6 @@ defmodule Loomkin.Tools.PeerChangeRole do
     team_id = param!(params, :team_id)
     target = param!(params, :target)
     new_role_str = param!(params, :new_role)
-    require_approval = param(params, :require_approval, false)
 
     new_role =
       try do
@@ -40,9 +38,7 @@ defmodule Loomkin.Tools.PeerChangeRole do
     else
       case Manager.find_agent(team_id, target) do
         {:ok, pid} ->
-          opts = if require_approval, do: [require_approval: true], else: []
-
-          case Loomkin.Teams.Agent.change_role(pid, new_role, opts) do
+          case Loomkin.Teams.Agent.change_role(pid, new_role) do
             :ok ->
               {:ok, %{result: "Role of #{target} changed to #{new_role}."}}
 

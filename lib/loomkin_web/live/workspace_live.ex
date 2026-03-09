@@ -780,7 +780,7 @@ defmodule LoomkinWeb.WorkspaceLive do
 
   def handle_event(
         "approve_card_agent",
-        %{"gate-id" => gate_id, "agent" => agent_name} = params,
+        %{"gate_id" => gate_id, "agent" => agent_name} = params,
         socket
       ) do
     context =
@@ -797,7 +797,7 @@ defmodule LoomkinWeb.WorkspaceLive do
 
   def handle_event(
         "deny_card_agent",
-        %{"gate-id" => gate_id, "agent" => agent_name} = params,
+        %{"gate_id" => gate_id, "agent" => agent_name} = params,
         socket
       ) do
     reason =
@@ -824,21 +824,23 @@ defmodule LoomkinWeb.WorkspaceLive do
 
   def handle_event(
         "approve_spawn",
-        %{"gate_id" => gate_id, "agent" => _agent_name} = params,
+        %{"gate_id" => gate_id, "agent" => agent_name} = params,
         socket
       ) do
     context = params["context"]
     send_spawn_gate_response(gate_id, %{outcome: :approved, context: context})
+    socket = update_agent_card(socket, agent_name, %{pending_approval: nil})
     {:noreply, socket}
   end
 
   def handle_event(
         "deny_spawn",
-        %{"gate_id" => gate_id, "agent" => _agent_name} = params,
+        %{"gate_id" => gate_id, "agent" => agent_name} = params,
         socket
       ) do
     reason = params["reason"] || ""
     send_spawn_gate_response(gate_id, %{outcome: :denied, reason: reason})
+    socket = update_agent_card(socket, agent_name, %{pending_approval: nil})
     {:noreply, socket}
   end
 
@@ -1108,7 +1110,7 @@ defmodule LoomkinWeb.WorkspaceLive do
     %{gate_id: gate_id, agent_name: agent_name, question: question, timeout_ms: timeout_ms} =
       sig.data
 
-    started_at = System.monotonic_time(:millisecond)
+    started_at = System.system_time(:millisecond)
 
     pending_approval = %{
       gate_id: gate_id,
@@ -1212,7 +1214,7 @@ defmodule LoomkinWeb.WorkspaceLive do
       estimated_cost: estimated_cost,
       limit_warning: limit_warning,
       timeout_ms: timeout_ms,
-      started_at: System.monotonic_time(:millisecond),
+      started_at: System.system_time(:millisecond),
       auto_approve_spawns: auto_approve_spawns
     }
 

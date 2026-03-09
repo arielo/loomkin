@@ -49,39 +49,41 @@ defmodule LoomkinWeb.TeamTreeComponent do
         phx-click-away="close_tree"
         phx-target={@myself}
       >
-        <%!-- Root team row (depth 0) --%>
-        <.team_row
+        <.team_subtree
           team_id={@root_team_id}
           depth={0}
+          team_tree={@team_tree}
           active_team_id={@active_team_id}
           agent_counts={@agent_counts}
           team_names={@team_names}
           myself={@myself}
         />
-        <%!-- Child rows (depth 1) --%>
-        <%= for child_id <- Map.get(@team_tree, @root_team_id, []) do %>
-          <.team_row
-            team_id={child_id}
-            depth={1}
-            active_team_id={@active_team_id}
-            agent_counts={@agent_counts}
-            team_names={@team_names}
-            myself={@myself}
-          />
-          <%!-- Grandchild rows (depth 2, max depth per Manager) --%>
-          <%= for grandchild_id <- Map.get(@team_tree, child_id, []) do %>
-            <.team_row
-              team_id={grandchild_id}
-              depth={2}
-              active_team_id={@active_team_id}
-              agent_counts={@agent_counts}
-              team_names={@team_names}
-              myself={@myself}
-            />
-          <% end %>
-        <% end %>
       </div>
     </div>
+    """
+  end
+
+  defp team_subtree(assigns) do
+    ~H"""
+    <.team_row
+      team_id={@team_id}
+      depth={@depth}
+      active_team_id={@active_team_id}
+      agent_counts={@agent_counts}
+      team_names={@team_names}
+      myself={@myself}
+    />
+    <%= for child_id <- Map.get(@team_tree, @team_id, []) do %>
+      <.team_subtree
+        team_id={child_id}
+        depth={@depth + 1}
+        team_tree={@team_tree}
+        active_team_id={@active_team_id}
+        agent_counts={@agent_counts}
+        team_names={@team_names}
+        myself={@myself}
+      />
+    <% end %>
     """
   end
 

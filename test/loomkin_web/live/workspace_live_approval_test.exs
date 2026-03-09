@@ -21,7 +21,7 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
       {:noreply, _updated_socket} =
         WorkspaceLive.handle_event(
           "approve_card_agent",
-          %{"gate-id" => gate_id, "agent" => agent_name, "context" => "looks good"},
+          %{"gate_id" => gate_id, "agent" => agent_name, "context" => "looks good"},
           socket
         )
 
@@ -43,7 +43,7 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
       {:noreply, _} =
         WorkspaceLive.handle_event(
           "approve_card_agent",
-          %{"gate-id" => gate_id, "agent" => agent_name, "context" => ""},
+          %{"gate_id" => gate_id, "agent" => agent_name, "context" => ""},
           socket
         )
 
@@ -64,7 +64,7 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
       {:noreply, updated_socket} =
         WorkspaceLive.handle_event(
           "approve_card_agent",
-          %{"gate-id" => gate_id, "agent" => agent_name, "context" => nil},
+          %{"gate_id" => gate_id, "agent" => agent_name, "context" => nil},
           socket
         )
 
@@ -80,7 +80,7 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
       {:noreply, _} =
         WorkspaceLive.handle_event(
           "approve_card_agent",
-          %{"gate-id" => "nonexistent-gate", "agent" => "ghost-agent", "context" => ""},
+          %{"gate_id" => "nonexistent-gate", "agent" => "ghost-agent", "context" => ""},
           socket
         )
     end
@@ -99,7 +99,7 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
       {:noreply, _} =
         WorkspaceLive.handle_event(
           "deny_card_agent",
-          %{"gate-id" => gate_id, "agent" => agent_name, "reason" => "not safe"},
+          %{"gate_id" => gate_id, "agent" => agent_name, "reason" => "not safe"},
           socket
         )
 
@@ -121,7 +121,7 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
       {:noreply, _} =
         WorkspaceLive.handle_event(
           "deny_card_agent",
-          %{"gate-id" => gate_id, "agent" => agent_name, "reason" => ""},
+          %{"gate_id" => gate_id, "agent" => agent_name, "reason" => ""},
           socket
         )
 
@@ -142,7 +142,7 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
       {:noreply, updated_socket} =
         WorkspaceLive.handle_event(
           "deny_card_agent",
-          %{"gate-id" => gate_id, "agent" => agent_name, "reason" => "not ready"},
+          %{"gate_id" => gate_id, "agent" => agent_name, "reason" => "not ready"},
           socket
         )
 
@@ -175,7 +175,7 @@ defmodule LoomkinWeb.Live.WorkspaceLiveApprovalTest do
       {:noreply, updated_socket} =
         WorkspaceLive.handle_event(
           "deny_card_agent",
-          %{"gate-id" => gate_id, "agent" => agent_name, "reason" => "risky"},
+          %{"gate_id" => gate_id, "agent" => agent_name, "reason" => "risky"},
           socket
         )
 
