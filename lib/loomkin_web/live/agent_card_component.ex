@@ -35,6 +35,8 @@ defmodule LoomkinWeb.AgentCardComponent do
        prev_content: nil,
        prev_content_type: nil,
        prev_focused: nil,
+       rendered_last_response: nil,
+       prev_last_response: nil,
        capability_bars_data: []
      )}
   end
@@ -53,6 +55,9 @@ defmodule LoomkinWeb.AgentCardComponent do
     old_content_type = socket.assigns.prev_content_type
     old_focused = socket.assigns.prev_focused
 
+    new_last_response = card && card[:last_response]
+    old_last_response = socket.assigns[:prev_last_response]
+
     socket =
       if new_content != old_content || new_content_type != old_content_type ||
            focused != old_focused do
@@ -63,6 +68,18 @@ defmodule LoomkinWeb.AgentCardComponent do
           prev_content: new_content,
           prev_content_type: new_content_type,
           prev_focused: focused
+        )
+      else
+        socket
+      end
+
+    socket =
+      if new_last_response != old_last_response do
+        rendered_last = render_card_markdown(format_content(new_last_response, false))
+
+        assign(socket,
+          rendered_last_response: rendered_last,
+          prev_last_response: new_last_response
         )
       else
         socket
@@ -307,17 +324,28 @@ defmodule LoomkinWeb.AgentCardComponent do
                 {@rendered_content}
               </div>
             <% _ -> %>
-              <%= if @card.status == :complete do %>
-                <div class="flex items-center gap-2 text-xs">
-                  <div class="h-px flex-1" style={"background: #{@agent_color}15;"} />
-                  <span style={"color: #{@agent_color}80;"}>complete</span>
-                  <div class="h-px flex-1" style={"background: #{@agent_color}15;"} />
-                </div>
-              <% else %>
-                <div class="flex items-center gap-2 text-[10px] text-muted font-mono">
-                  <span class="kin-idle-blink" style={"color: #{@agent_color}40;"}>_</span>
-                  <span class="opacity-40">standby</span>
-                </div>
+              <%= cond do %>
+                <% @rendered_last_response -> %>
+                  <div
+                    class={[
+                      "text-xs leading-relaxed opacity-40 agent-card-content",
+                      !@focused && "line-clamp-3"
+                    ]}
+                    style="color: var(--text-secondary);"
+                  >
+                    {@rendered_last_response}
+                  </div>
+                <% @card.status == :complete -> %>
+                  <div class="flex items-center gap-2 text-xs">
+                    <div class="h-px flex-1" style={"background: #{@agent_color}15;"} />
+                    <span style={"color: #{@agent_color}80;"}>complete</span>
+                    <div class="h-px flex-1" style={"background: #{@agent_color}15;"} />
+                  </div>
+                <% true -> %>
+                  <div class="flex items-center gap-2 text-[10px] text-muted font-mono">
+                    <span class="kin-idle-blink" style={"color: #{@agent_color}40;"}>_</span>
+                    <span class="opacity-40">standby</span>
+                  </div>
               <% end %>
           <% end %>
 
