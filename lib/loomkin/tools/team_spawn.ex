@@ -19,7 +19,13 @@ defmodule Loomkin.Tools.TeamSpawn do
         doc:
           "List of %{name, role} maps. role must be one of: researcher, coder, reviewer, tester, lead"
       ],
-      project_path: [type: :string, doc: "Path to the project for agents to work on"]
+      project_path: [type: :string, doc: "Path to the project for agents to work on"],
+      spawn_type: [
+        type: :atom,
+        required: false,
+        doc:
+          "Optional spawn type. Use :research for auto-approved research sub-teams (skips human gate, budget check still runs)."
+      ]
     ]
 
   import Loomkin.Tool, only: [param!: 2, param: 2]

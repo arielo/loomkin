@@ -788,6 +788,12 @@ defmodule Loomkin.Teams.Agent do
     {:noreply, %{state | pause_queued: true}}
   end
 
+  def handle_cast(:request_pause, %{status: :awaiting_synthesis} = state) do
+    # Queue pause during research synthesis — same pattern as approval_pending and ask_user_pending
+    broadcast_team(state, {:agent_pause_queued, state.name})
+    {:noreply, %{state | pause_queued: true}}
+  end
+
   def handle_cast(:request_pause, state) do
     {:noreply, %{state | pause_requested: true}}
   end
@@ -797,6 +803,18 @@ defmodule Loomkin.Teams.Agent do
     # Mark agent approval_pending so the UI can show the gate.
     # The tool task process holds the receive block; this cast just updates status.
     state = set_status_and_broadcast(state, :approval_pending)
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast({:enter_awaiting_synthesis, _researcher_count}, state) do
+    state = set_status_and_broadcast(state, :awaiting_synthesis)
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast(:exit_awaiting_synthesis, state) do
+    state = set_status_and_broadcast(state, :working)
     {:noreply, state}
   end
 
@@ -850,6 +868,25 @@ defmodule Loomkin.Teams.Agent do
   @impl true
   def handle_cast({:update_project_path, new_path}, state) do
     {:noreply, %{state | project_path: new_path}}
+  end
+
+  @impl true
+  def handle_cast(
+        {:peer_message, from, content},
+        %{status: :awaiting_synthesis, name: name, team_id: team_id} = state
+      ) do
+    # Route peer_message to the registered tool task (blocking in collect_research_findings)
+    # instead of appending to the agent's message history.
+    case Registry.lookup(Loomkin.Teams.AgentRegistry, {:awaiting_synthesis, team_id, name}) do
+      [{tool_task_pid, _}] ->
+        send(tool_task_pid, {:research_findings, from, content})
+
+      [] ->
+        # Fallback: no tool task registered yet; discard (will not deadlock)
+        :ok
+    end
+
+    {:noreply, state}
   end
 
   @impl true
@@ -2246,6 +2283,92 @@ defmodule Loomkin.Teams.Agent do
   @default_max_agents_per_team 10
 
   defp run_spawn_gate_intercept(agent_pid, tool_module, tool_args, context, team_id, agent_name) do
+    spawn_type = Map.get(tool_args, "spawn_type", Map.get(tool_args, :spawn_type))
+
+    if spawn_type in [:research, "research"] do
+      run_research_spawn(agent_pid, tool_module, tool_args, context, team_id, agent_name)
+    else
+      run_human_or_auto_spawn_gate(
+        agent_pid,
+        tool_module,
+        tool_args,
+        context,
+        team_id,
+        agent_name
+      )
+    end
+  end
+
+  defp run_research_spawn(agent_pid, tool_module, tool_args, context, team_id, agent_name) do
+    roles = Map.get(tool_args, "roles", Map.get(tool_args, :roles, []))
+    estimated_cost = estimate_spawn_cost(roles)
+    researcher_count = length(roles)
+
+    # Budget check still runs for research spawns
+    case GenServer.call(agent_pid, {:check_spawn_budget, estimated_cost}) do
+      {:budget_exceeded, details} ->
+        AgentLoop.format_tool_result({:error, :budget_exceeded, details})
+
+      :ok ->
+        # Register tool task in Registry before entering awaiting_synthesis
+        Registry.register(
+          Loomkin.Teams.AgentRegistry,
+          {:awaiting_synthesis, team_id, agent_name},
+          self()
+        )
+
+        # Transition agent to :awaiting_synthesis
+        GenServer.cast(agent_pid, {:enter_awaiting_synthesis, researcher_count})
+
+        # Execute spawn (nil gate_id = no GateResolved published; no human gate opened)
+        execute_spawn_and_notify(
+          agent_pid,
+          tool_module,
+          tool_args,
+          context,
+          nil,
+          team_id,
+          agent_name
+        )
+
+        # Block in receive loop collecting findings from researchers
+        findings = collect_research_findings(researcher_count, 120_000, [])
+
+        # Exit awaiting_synthesis; agent returns to :working
+        GenServer.cast(agent_pid, :exit_awaiting_synthesis)
+
+        # Registry auto-unregisters when process terminates; no explicit call needed
+
+        summary =
+          findings
+          |> Enum.map(fn {from, content} -> "--- #{from} ---\n#{content}" end)
+          |> Enum.join("\n\n")
+
+        {:ok, %{result: "Research synthesis complete.\n\n#{summary}"}}
+    end
+  end
+
+  defp collect_research_findings(0, _timeout_ms, acc), do: Enum.reverse(acc)
+
+  defp collect_research_findings(count, timeout_ms, acc) when count > 0 do
+    receive do
+      {:research_findings, from, content} ->
+        collect_research_findings(count - 1, timeout_ms, [{from, content} | acc])
+    after
+      timeout_ms ->
+        # partial findings on timeout — proceed with what arrived
+        Enum.reverse(acc)
+    end
+  end
+
+  defp run_human_or_auto_spawn_gate(
+         agent_pid,
+         tool_module,
+         tool_args,
+         context,
+         team_id,
+         agent_name
+       ) do
     roles = Map.get(tool_args, "roles", Map.get(tool_args, :roles, []))
     estimated_cost = estimate_spawn_cost(roles)
 
