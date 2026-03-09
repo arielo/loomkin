@@ -796,6 +796,14 @@ defmodule Loomkin.Teams.Agent do
   end
 
   @impl true
+  def handle_cast({:open_spawn_gate, _gate_id, _pending_info}, state) do
+    # Mark agent approval_pending so the UI can show the gate.
+    # The tool task process holds the receive block; this cast just updates status.
+    state = set_status_and_broadcast(state, :approval_pending)
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_cast({:append_ask_user_question, tool_args, card_id, question_id}, state) do
     question_text = Map.get(tool_args, "question") || Map.get(tool_args, :question)
     options = Map.get(tool_args, "options") || Map.get(tool_args, :options) || []
@@ -2201,23 +2209,248 @@ defmodule Loomkin.Teams.Agent do
               )
           end
         else
-          result = AgentLoop.default_run_tool(tool_module, tool_args, context)
-
-          # If TeamSpawn succeeded, notify GenServer to track the child team
           if tool_module == Loomkin.Tools.TeamSpawn do
-            case result do
-              {:ok, %{team_id: child_team_id}} ->
-                send(agent_pid, {:child_team_spawned, child_team_id})
-
-              _ ->
-                :ok
-            end
+            run_spawn_gate_intercept(agent_pid, tool_module, tool_args, context, team_id, name)
+          else
+            AgentLoop.default_run_tool(tool_module, tool_args, context)
           end
-
-          result
         end
       end
     ]
+  end
+
+  # -- Spawn gate intercept helpers --
+
+  @role_cost_estimates %{
+    "researcher" => 0.20,
+    "coder" => 0.50,
+    "reviewer" => 0.30,
+    "tester" => 0.30,
+    "lead" => 0.50,
+    "concierge" => 0.10,
+    "orienter" => 0.10
+  }
+
+  @default_max_agents_per_team 10
+
+  defp run_spawn_gate_intercept(agent_pid, tool_module, tool_args, context, team_id, agent_name) do
+    roles = Map.get(tool_args, "roles", Map.get(tool_args, :roles, []))
+    estimated_cost = estimate_spawn_cost(roles)
+
+    # Step 2: guard against double-gate
+    agent_state = :sys.get_state(agent_pid)
+
+    if agent_state.status == :approval_pending do
+      AgentLoop.format_tool_result(
+        {:error, :approval_pending, %{message: "Agent already has an open approval gate"}}
+      )
+    else
+      # Step 3: budget check
+      case GenServer.call(agent_pid, {:check_spawn_budget, estimated_cost}) do
+        {:budget_exceeded, details} ->
+          AgentLoop.format_tool_result({:error, :budget_exceeded, details})
+
+        :ok ->
+          # Step 4: check auto-approve setting (read via GenServer for freshness)
+          %{auto_approve_spawns: auto_approve} = GenServer.call(agent_pid, :get_spawn_settings)
+
+          if auto_approve do
+            # Step 6 directly: execute spawn
+            execute_spawn_and_notify(agent_pid, tool_module, tool_args, context, nil)
+          else
+            run_human_spawn_gate(
+              agent_pid,
+              tool_module,
+              tool_args,
+              context,
+              team_id,
+              agent_name,
+              estimated_cost,
+              roles
+            )
+          end
+      end
+    end
+  end
+
+  defp run_human_spawn_gate(
+         agent_pid,
+         tool_module,
+         tool_args,
+         context,
+         team_id,
+         agent_name,
+         estimated_cost,
+         roles
+       ) do
+    gate_id = Ecto.UUID.generate()
+
+    team_name =
+      Map.get(tool_args, "name", Map.get(tool_args, :name, "unnamed-team"))
+
+    timeout_ms =
+      Map.get(tool_args, "timeout_ms", Map.get(tool_args, :timeout_ms, nil)) ||
+        Application.get_env(:loomkin, :spawn_gate_timeout_ms, 300_000)
+
+    limit_warning = compute_limit_warning(team_id, length(roles))
+
+    %{auto_approve_spawns: auto_approve} = GenServer.call(agent_pid, :get_spawn_settings)
+
+    pending_info = %{
+      type: :spawn_gate,
+      gate_id: gate_id,
+      team_name: team_name,
+      roles: roles,
+      estimated_cost: estimated_cost,
+      limit_warning: limit_warning
+    }
+
+    # Open gate: mark agent approval_pending via cast (non-blocking from tool task)
+    GenServer.cast(agent_pid, {:open_spawn_gate, gate_id, pending_info})
+
+    # Register this tool task process for response routing
+    Registry.register(Loomkin.Teams.AgentRegistry, {:spawn_gate, gate_id}, self())
+
+    # Publish GateRequested signal for LiveView to render the gate ui
+    signal =
+      Loomkin.Signals.Spawn.GateRequested.new!(%{
+        gate_id: gate_id,
+        agent_name: to_string(agent_name),
+        team_id: team_id,
+        team_name: team_name,
+        roles: roles,
+        estimated_cost: estimated_cost,
+        limit_warning: limit_warning,
+        timeout_ms: timeout_ms,
+        auto_approve_spawns: auto_approve
+      })
+
+    Loomkin.Signals.publish(signal)
+
+    receive do
+      {:spawn_gate_response, ^gate_id, %{outcome: :approved}} ->
+        Registry.unregister(Loomkin.Teams.AgentRegistry, {:spawn_gate, gate_id})
+        execute_spawn_and_notify(agent_pid, tool_module, tool_args, context, gate_id)
+
+      {:spawn_gate_response, ^gate_id, %{outcome: :denied, reason: reason}} ->
+        Registry.unregister(Loomkin.Teams.AgentRegistry, {:spawn_gate, gate_id})
+
+        resolved =
+          Loomkin.Signals.Spawn.GateResolved.new!(%{
+            gate_id: gate_id,
+            agent_name: to_string(agent_name),
+            team_id: team_id,
+            outcome: :denied
+          })
+
+        Loomkin.Signals.publish(resolved)
+
+        AgentLoop.format_tool_result(
+          {:ok,
+           %{
+             status: :denied,
+             reason: :human_denied,
+             message: reason || "Denied by human."
+           }}
+        )
+    after
+      timeout_ms ->
+        Registry.unregister(Loomkin.Teams.AgentRegistry, {:spawn_gate, gate_id})
+
+        resolved =
+          Loomkin.Signals.Spawn.GateResolved.new!(%{
+            gate_id: gate_id,
+            agent_name: to_string(agent_name),
+            team_id: team_id,
+            outcome: :timeout
+          })
+
+        Loomkin.Signals.publish(resolved)
+
+        AgentLoop.format_tool_result(
+          {:ok,
+           %{
+             status: :denied,
+             reason: :timeout,
+             message: "Spawn gate timed out."
+           }}
+        )
+    end
+  end
+
+  defp execute_spawn_and_notify(agent_pid, tool_module, tool_args, context, gate_id) do
+    result = AgentLoop.default_run_tool(tool_module, tool_args, context)
+
+    if gate_id do
+      # Publish GateResolved for approved path (human gate)
+      agent_state = :sys.get_state(agent_pid)
+
+      resolved =
+        Loomkin.Signals.Spawn.GateResolved.new!(%{
+          gate_id: gate_id,
+          agent_name: to_string(agent_state.name),
+          team_id: agent_state.team_id,
+          outcome: :approved
+        })
+
+      Loomkin.Signals.publish(resolved)
+    end
+
+    # Preserve existing child_team_spawned notify
+    case result do
+      {:ok, %{team_id: child_team_id}} ->
+        send(agent_pid, {:child_team_spawned, child_team_id})
+
+      _ ->
+        :ok
+    end
+
+    result
+  end
+
+  defp estimate_spawn_cost(roles) when is_list(roles) do
+    Enum.reduce(roles, 0.0, fn role, acc ->
+      role_str =
+        cond do
+          is_map(role) -> to_string(Map.get(role, "role", Map.get(role, :role, "researcher")))
+          is_binary(role) -> role
+          is_atom(role) -> to_string(role)
+          true -> "researcher"
+        end
+
+      cost = Map.get(@role_cost_estimates, role_str, 0.20)
+      acc + cost
+    end)
+  end
+
+  defp estimate_spawn_cost(_), do: 0.20
+
+  # Mirroring Manager's @default_max_nesting_depth = 2
+  @spawn_max_nesting_depth 2
+
+  defp compute_limit_warning(team_id, planned_agent_count) do
+    # Check depth warning: if team depth + 1 >= 80% of max depth (2), warn
+    # 80% of 2 = 1.6 → floor = 1, so any depth >= 1 approaching limit of 2
+    depth_threshold = floor(@spawn_max_nesting_depth * 0.8)
+
+    current_depth =
+      case Manager.get_team_meta(team_id) do
+        {:ok, %{depth: d}} -> d
+        _ -> 0
+      end
+
+    if current_depth >= depth_threshold do
+      :depth
+    else
+      # Check agent count warning: planned spawn total >= 80% of max agents
+      agent_threshold = floor(@default_max_agents_per_team * 0.8)
+
+      if planned_agent_count >= agent_threshold do
+        :agents
+      else
+        nil
+      end
+    end
   end
 
   defp build_permission_callback(%{permission_mode: :auto}), do: nil

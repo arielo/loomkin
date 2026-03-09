@@ -43,7 +43,9 @@ defmodule Loomkin.Teams.TeamBroadcaster do
                     "agent.recovered",
                     "agent.permanently_failed",
                     "agent.approval.requested",
-                    "agent.approval.resolved"
+                    "agent.approval.resolved",
+                    "agent.spawn.gate.requested",
+                    "agent.spawn.gate.resolved"
                   ])
 
   defstruct team_ids: MapSet.new(),
