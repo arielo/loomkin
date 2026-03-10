@@ -568,6 +568,10 @@ defmodule Loomkin.Session do
 
   defp validate_model(model, fallback) when is_binary(model) do
     case String.split(model, ":", parts: 2) do
+      ["ollama", _model_id] ->
+        # Local provider — always valid if Ollama is running
+        if Loomkin.Providers.Ollama.available?(), do: model, else: fallback
+
       [provider, _model_id] ->
         provider_atom = String.to_existing_atom(provider)
 

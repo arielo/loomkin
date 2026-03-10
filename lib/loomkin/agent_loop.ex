@@ -466,11 +466,16 @@ defmodule Loomkin.AgentLoop do
   end
 
   defp run_tool(tool_module, tool_args, context, config) do
-    if config.on_tool_execute do
-      config.on_tool_execute.(tool_module, tool_args, context)
-    else
-      default_run_tool(tool_module, tool_args, context)
-    end
+    result =
+      if config.on_tool_execute do
+        config.on_tool_execute.(tool_module, tool_args, context)
+      else
+        default_run_tool(tool_module, tool_args, context)
+      end
+
+    # Ensure we always return a string — custom on_tool_execute callbacks
+    # may return raw Jido tuples like {:ok, %{result: "..."}}
+    if is_binary(result), do: result, else: format_tool_result(result)
   end
 
   @doc false

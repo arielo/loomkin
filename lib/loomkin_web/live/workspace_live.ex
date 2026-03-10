@@ -1987,6 +1987,11 @@ defmodule LoomkinWeb.WorkspaceLive do
   # Messages from child components
   def handle_info({:change_model, model}, socket) do
     Session.update_model(socket.assigns.session_id, model)
+
+    if team_id = socket.assigns[:team_id] do
+      Teams.Manager.update_all_models(team_id, model)
+    end
+
     {:noreply, assign(socket, model: model)}
   end
 

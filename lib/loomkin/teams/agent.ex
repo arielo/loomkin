@@ -172,6 +172,11 @@ defmodule Loomkin.Teams.Agent do
     GenServer.cast(pid, {:update_project_path, new_path})
   end
 
+  @doc "Update the model on a running agent."
+  def update_model(pid, new_model) do
+    GenServer.cast(pid, {:update_model, new_model})
+  end
+
   @doc "Get the full GenServer state (for serialization/migration)."
   def get_state(pid, timeout \\ 5_000) do
     GenServer.call(pid, :get_state, timeout)
@@ -912,6 +917,11 @@ defmodule Loomkin.Teams.Agent do
   @impl true
   def handle_cast({:update_project_path, new_path}, state) do
     {:noreply, %{state | project_path: new_path}}
+  end
+
+  @impl true
+  def handle_cast({:update_model, new_model}, state) do
+    {:noreply, %{state | model: new_model}}
   end
 
   @impl true

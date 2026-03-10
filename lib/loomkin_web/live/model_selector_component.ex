@@ -56,10 +56,11 @@ defmodule LoomkinWeb.ModelSelectorComponent do
   defp load_providers do
     all = Loomkin.Models.all_providers_enriched()
 
-    # Split into configured (has key/OAuth + models) and unconfigured
+    # Split into configured (has key/OAuth/local + models) and unconfigured
     {active, unconfigured} =
       Enum.split_with(all, fn {_p, _name, status, models} ->
-        (match?({:set, _}, status) or match?({:oauth, :connected}, status)) and models != []
+        (match?({:set, _}, status) or match?({:oauth, :connected}, status) or status == :local) and
+          models != []
       end)
 
     {active, unconfigured, all}
@@ -439,6 +440,13 @@ defmodule LoomkinWeb.ModelSelectorComponent do
                   {env_var}
                 </span>
               </span>
+            <% :local -> %>
+              <span class="flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                <span class="text-[10px]" style="color: rgba(52, 211, 153, 0.7);">Local</span>
+              </span>
+            <% _ -> %>
+              <span></span>
           <% end %>
         </div>
       </div>

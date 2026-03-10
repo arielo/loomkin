@@ -112,5 +112,12 @@ defmodule Loomkin.Application do
         end
       end
     end
+
+    # Register local providers (Ollama)
+    try do
+      Loomkin.Providers.Ollama.register!()
+    rescue
+      _e -> :ok
+    end
   end
 end

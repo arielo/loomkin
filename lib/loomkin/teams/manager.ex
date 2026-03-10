@@ -270,6 +270,20 @@ defmodule Loomkin.Teams.Manager do
     end
   end
 
+  @doc "Update the model on all agents in a team and its sub-teams."
+  @spec update_all_models(String.t(), String.t()) :: :ok
+  def update_all_models(team_id, new_model) do
+    for %{pid: pid} <- list_agents(team_id) do
+      Loomkin.Teams.Agent.update_model(pid, new_model)
+    end
+
+    for sub_id <- list_sub_teams(team_id) do
+      update_all_models(sub_id, new_model)
+    end
+
+    :ok
+  end
+
   @doc "Cancel active agent loops across a team and its sub-teams."
   @spec cancel_all_loops(String.t()) :: :ok
   def cancel_all_loops(team_id) do
