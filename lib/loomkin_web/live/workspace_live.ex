@@ -1508,6 +1508,7 @@ defmodule LoomkinWeb.WorkspaceLive do
     %{session_id: sid} = sig.data
 
     if sid == socket.assigns.session_id do
+      socket = append_debug_signal(socket, sig)
       msg = Map.get(sig.data, :message, sig.data)
       handle_info({:new_message, sid, msg}, socket)
     else
@@ -1519,7 +1520,19 @@ defmodule LoomkinWeb.WorkspaceLive do
     %{session_id: sid, status: status} = sig.data
 
     if sid == socket.assigns.session_id do
-      handle_info({:session_status, sid, status}, socket)
+      socket = append_debug_signal(socket, sig)
+
+      # Forward raw event to existing handlers (e.g., stream_start/delta/end)
+      socket = forward_raw_event(socket, sig.data[:raw_event])
+
+      # Don't overwrite valid status with :unknown
+      if status == :unknown do
+        require Logger
+        Logger.warning("[Kin:UI] received :unknown status — architect catch-all fired")
+        {:noreply, socket}
+      else
+        {:noreply, assign(socket, status: status)}
+      end
     else
       {:noreply, socket}
     end
@@ -1754,6 +1767,11 @@ defmodule LoomkinWeb.WorkspaceLive do
         socket
       end
 
+    {:noreply, socket}
+  end
+
+  def handle_info({:session_status, _session_id, :unknown}, socket) do
+    # Don't overwrite valid status with :unknown
     {:noreply, socket}
   end
 
@@ -3131,9 +3149,16 @@ defmodule LoomkinWeb.WorkspaceLive do
   # Used by team_broadcast handlers to avoid extra mailbox hops.
   defp dispatch_signal(%Jido.Signal{} = sig, socket) do
     socket =
-      case handle_info(sig, socket) do
-        {:noreply, socket} -> socket
-        _ -> socket
+      try do
+        case handle_info(sig, socket) do
+          {:noreply, socket} -> socket
+          _ -> socket
+        end
+      rescue
+        e ->
+          require Logger
+          Logger.warning("[Kin:UI] dispatch_signal crashed on #{sig.type}: #{inspect(e)}")
+          socket
       end
 
     # Append to debug signal log (capped at 50)
@@ -3144,6 +3169,15 @@ defmodule LoomkinWeb.WorkspaceLive do
     }
 
     debug_signals = Enum.take([entry | socket.assigns.debug_signals], 50)
+
+    # Auto-open debug panel on first signal
+    socket =
+      if socket.assigns.debug_signals == [] and not socket.assigns.debug_panel_open do
+        assign(socket, :debug_panel_open, true)
+      else
+        socket
+      end
+
     assign(socket, :debug_signals, debug_signals)
   end
 
@@ -3326,6 +3360,31 @@ defmodule LoomkinWeb.WorkspaceLive do
           />
         </div>
       </header>
+
+      <%!-- Status Banner — always visible, shows current system state --%>
+      <div class="flex-shrink-0 flex items-center gap-3 px-4 py-1.5 bg-surface-1 border-b border-subtle text-xs">
+        <span class={status_banner_class(@status)}>
+          {status_label(@status, @current_tool_name)}
+        </span>
+
+        <span :if={@architect_phase} class="text-amber-400 font-mono">
+          phase: {@architect_phase}
+        </span>
+
+        <span :if={@current_tool} class="text-blue-400 font-mono truncate">
+          tool: {@current_tool}
+        </span>
+
+        <span :if={@streaming} class="text-emerald-400 animate-pulse">streaming...</span>
+
+        <span :if={@cached_agents != []} class="text-purple-400">
+          agents: {length(@cached_agents)}
+        </span>
+
+        <button phx-click="toggle_debug_panel" class="ml-auto text-zinc-500 hover:text-zinc-300">
+          signals: {length(@debug_signals)}
+        </button>
+      </div>
 
       <%!-- ── Main Content — branches on mode ── --%>
       <div id="main-content" class="flex flex-1 min-h-0 flex-col xl:flex-row">
@@ -3600,9 +3659,45 @@ defmodule LoomkinWeb.WorkspaceLive do
 
   defp status_label(:idle, _tool), do: "Ready"
   defp status_label(:thinking, _tool), do: "Thinking..."
+  defp status_label(:streaming, _tool), do: "Streaming..."
   defp status_label(:executing_tool, nil), do: "Running tool..."
   defp status_label(:executing_tool, tool_name), do: tool_name
+  defp status_label(:unknown, _tool), do: "Unknown"
   defp status_label(status, _tool), do: to_string(status)
+
+  defp status_banner_class(:idle), do: "px-2 py-0.5 rounded-full bg-zinc-700 text-zinc-300"
+
+  defp status_banner_class(:thinking),
+    do: "px-2 py-0.5 rounded-full bg-amber-900/60 text-amber-300 animate-pulse"
+
+  defp status_banner_class(:streaming),
+    do: "px-2 py-0.5 rounded-full bg-emerald-900/60 text-emerald-300 animate-pulse"
+
+  defp status_banner_class(:executing_tool),
+    do: "px-2 py-0.5 rounded-full bg-blue-900/60 text-blue-300 animate-pulse"
+
+  defp status_banner_class(:error), do: "px-2 py-0.5 rounded-full bg-red-900/60 text-red-300"
+  defp status_banner_class(:unknown), do: "px-2 py-0.5 rounded-full bg-red-900/60 text-red-300"
+  defp status_banner_class(_), do: "px-2 py-0.5 rounded-full bg-zinc-700 text-zinc-300"
+
+  defp append_debug_signal(socket, sig) do
+    entry = %{
+      type: sig.type,
+      at: System.system_time(:millisecond),
+      agent: get_in(sig.data, [:agent_name]) || "session"
+    }
+
+    assign(socket, :debug_signals, Enum.take([entry | socket.assigns.debug_signals], 50))
+  end
+
+  defp forward_raw_event(socket, nil), do: socket
+
+  defp forward_raw_event(socket, raw_event) do
+    case handle_info(raw_event, socket) do
+      {:noreply, socket} -> socket
+      _ -> socket
+    end
+  end
 
   # tab_icon/1, tab_label/1, render_tab/2 moved to SidebarPanelComponent
 

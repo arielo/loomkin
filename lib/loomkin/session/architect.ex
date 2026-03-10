@@ -1030,13 +1030,47 @@ defmodule Loomkin.Session.Architect do
     _ -> :ok
   end
 
-  defp broadcast(session_id, event) do
-    # Catch-all for architect-specific events (phase, plan, step, stream, tool, retry)
+  defp broadcast(session_id, {:stream_start, _sid}) do
     signal =
-      Loomkin.Signals.Session.StatusChanged.new!(%{session_id: session_id, status: :unknown})
+      Loomkin.Signals.Session.StatusChanged.new!(%{session_id: session_id, status: :streaming})
 
-    Loomkin.Signals.publish(%{signal | data: Map.put(signal.data, :raw_event, event)})
+    Loomkin.Signals.publish(%{
+      signal
+      | data: Map.put(signal.data, :raw_event, {:stream_start, session_id})
+    })
   rescue
     _ -> :ok
+  end
+
+  defp broadcast(session_id, {:stream_delta, _sid, payload}) do
+    signal =
+      Loomkin.Signals.Session.StatusChanged.new!(%{session_id: session_id, status: :streaming})
+
+    Loomkin.Signals.publish(%{
+      signal
+      | data: Map.put(signal.data, :raw_event, {:stream_delta, session_id, payload})
+    })
+  rescue
+    _ -> :ok
+  end
+
+  defp broadcast(session_id, {:stream_end, _sid}) do
+    signal =
+      Loomkin.Signals.Session.StatusChanged.new!(%{session_id: session_id, status: :idle})
+
+    Loomkin.Signals.publish(%{
+      signal
+      | data: Map.put(signal.data, :raw_event, {:stream_end, session_id})
+    })
+  rescue
+    _ -> :ok
+  end
+
+  defp broadcast(session_id, event) do
+    require Logger
+
+    Logger.warning(
+      "[Architect] unhandled broadcast event for #{session_id}: #{inspect(event, limit: 200)}"
+    )
   end
 end

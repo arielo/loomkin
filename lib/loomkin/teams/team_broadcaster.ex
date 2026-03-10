@@ -155,7 +155,7 @@ defmodule Loomkin.Teams.TeamBroadcaster do
         {:noreply, state}
 
       team_id == nil ->
-        Logger.debug(
+        Logger.warning(
           "[TeamBroadcaster] dropping non-critical signal with nil team_id: #{signal.type}"
         )
 
