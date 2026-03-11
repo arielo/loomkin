@@ -7,6 +7,7 @@ defmodule Loomkin.Teams.Manager do
   alias Loomkin.Decisions.Broadcaster
   alias Loomkin.Signals.Team.ChildTeamCreated
   alias Loomkin.Teams.Comms
+  alias Loomkin.Teams.ComplexityMonitor
   alias Loomkin.Teams.ConflictDetector
   alias Loomkin.Teams.Distributed
   alias Loomkin.Teams.MessageScheduler
@@ -498,7 +499,8 @@ defmodule Loomkin.Teams.Manager do
         {ConflictDetector, team_id: team_id},
         {MessageScheduler, team_id: team_id},
         {Negotiation, team_id: team_id},
-        {Rendezvous, team_id: team_id}
+        {Rendezvous, team_id: team_id},
+        {ComplexityMonitor, team_id: team_id}
       ]
 
       for {mod, opts} <- components do
@@ -522,7 +524,8 @@ defmodule Loomkin.Teams.Manager do
           {:conflict_detector, team_id},
           {:message_scheduler, team_id},
           {:negotiation, team_id},
-          {:rendezvous, team_id}
+          {:rendezvous, team_id},
+          {:complexity_monitor, team_id}
         ] do
       case Registry.lookup(Loomkin.Teams.AgentRegistry, key) do
         [{pid, _}] -> Distributed.terminate_child(pid)
