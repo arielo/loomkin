@@ -10,6 +10,7 @@ defmodule Loomkin.Healing.EphemeralAgent do
 
   require Logger
 
+  alias Loomkin.Healing.Orchestrator
   alias Loomkin.Healing.Prompts
   alias Loomkin.Teams.Manager
 
@@ -36,7 +37,7 @@ defmodule Loomkin.Healing.EphemeralAgent do
   ]
 
   @doc """
-  Start an ephemeral healing agent under the task supervisor.
+  Start an ephemeral healing agent under the healing task supervisor.
 
   ## Options
 
@@ -61,7 +62,7 @@ defmodule Loomkin.Healing.EphemeralAgent do
     Logger.info("[Kin:healing] starting ephemeral #{role} session=#{session_id} team=#{team_id}")
 
     {:ok, pid} =
-      Task.Supervisor.start_child(Loomkin.Teams.TaskSupervisor, fn ->
+      Task.Supervisor.start_child(Loomkin.Healing.TaskSupervisor, fn ->
         run(role, opts)
       end)
 
@@ -163,21 +164,12 @@ defmodule Loomkin.Healing.EphemeralAgent do
   end
 
   defp resolve_model(team_id) do
-    case Manager.get_team_meta(team_id) do
-      {:ok, meta} ->
-        session_id = meta[:session_id]
-
-        if session_id do
-          case Loomkin.Teams.Role.fast_model_opts(session_id) do
-            [model: model] when is_binary(model) -> model
-            _ -> default_model()
-          end
-        else
-          default_model()
-        end
-
-      :error ->
-        default_model()
+    with {:ok, meta} <- Manager.get_team_meta(team_id),
+         session_id when not is_nil(session_id) <- meta[:session_id],
+         [model: model] when is_binary(model) <- Loomkin.Teams.Role.fast_model_opts(session_id) do
+      model
+    else
+      _ -> default_model()
     end
   end
 
@@ -220,30 +212,27 @@ defmodule Loomkin.Healing.EphemeralAgent do
     })
   end
 
-  defp publish_signal(team_id, agent_name, _type, payload) do
+  defp publish_signal(team_id, agent_name, type, payload) do
     Phoenix.PubSub.broadcast(
       Loomkin.PubSub,
       "team:#{team_id}",
-      {:healing_event, Map.merge(payload, %{agent_name: agent_name, team_id: team_id})}
+      {:healing_event,
+       Map.merge(payload, %{type: type, agent_name: agent_name, team_id: team_id})}
     )
   rescue
     _ -> :ok
   end
 
-  @orchestrator Loomkin.Healing.Orchestrator
-
+  # Diagnostician failure uses dedicated diagnose_failed (S5 fix)
   defp report_error(:diagnostician, session_id, reason) do
-    if Code.ensure_loaded?(@orchestrator) && function_exported?(@orchestrator, :fix_failed, 2) do
-      apply(@orchestrator, :fix_failed, [
-        session_id,
-        "Diagnostician failed: #{inspect(reason)}"
-      ])
-    end
+    Orchestrator.diagnose_failed(session_id, "Diagnostician failed: #{inspect(reason)}")
+  rescue
+    _ -> :ok
   end
 
   defp report_error(:fixer, session_id, reason) do
-    if Code.ensure_loaded?(@orchestrator) && function_exported?(@orchestrator, :fix_failed, 2) do
-      apply(@orchestrator, :fix_failed, [session_id, "Fixer failed: #{inspect(reason)}"])
-    end
+    Orchestrator.fix_failed(session_id, "Fixer failed: #{inspect(reason)}")
+  rescue
+    _ -> :ok
   end
 end

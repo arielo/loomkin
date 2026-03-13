@@ -42,7 +42,7 @@ defmodule Loomkin.Signals.Healing do
         session_id: [type: :string, required: true],
         team_id: [type: :string, required: true],
         agent_name: [type: :string, required: true],
-        outcome: [type: {:in, [:healed, :escalated, :timed_out]}, required: true],
+        outcome: [type: {:in, [:healed, :escalated, :timed_out, :cancelled]}, required: true],
         duration_ms: [type: :integer, required: true]
       ]
   end

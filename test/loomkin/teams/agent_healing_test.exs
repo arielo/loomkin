@@ -9,6 +9,19 @@ defmodule Loomkin.Teams.AgentHealingTest do
   alias Loomkin.Teams.Agent
   alias Loomkin.Teams.QueuedMessage
 
+  setup do
+    prev = Application.get_env(:loomkin, :healing_ephemeral_agent)
+    Application.put_env(:loomkin, :healing_ephemeral_agent, Loomkin.Healing.EphemeralAgentStub)
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:loomkin, :healing_ephemeral_agent, prev),
+        else: Application.delete_env(:loomkin, :healing_ephemeral_agent)
+    end)
+
+    :ok
+  end
+
   defp unique_team_id do
     "test-healing-#{:erlang.unique_integer([:positive])}"
   end
@@ -30,10 +43,7 @@ defmodule Loomkin.Teams.AgentHealingTest do
     :sys.replace_state(pid, fn state ->
       frozen_state = %{
         messages: state.messages,
-        task: state.task,
-        context: state.context,
-        cost_usd: state.cost_usd,
-        tokens_used: state.tokens_used
+        task: state.task
       }
 
       %{
@@ -52,10 +62,7 @@ defmodule Loomkin.Teams.AgentHealingTest do
 
       frozen_state = %{
         messages: [%{role: :user, content: "do something"}],
-        task: task,
-        context: state.context,
-        cost_usd: 0.5,
-        tokens_used: 1000
+        task: task
       }
 
       %{
@@ -113,7 +120,7 @@ defmodule Loomkin.Teams.AgentHealingTest do
       assert state.loop_task == nil
     end
 
-    test "frozen state preserves messages, task, context, cost, and tokens" do
+    test "frozen state preserves messages and task" do
       %{pid: pid} = start_agent()
       suspend_agent_with_task(pid)
 
@@ -121,8 +128,6 @@ defmodule Loomkin.Teams.AgentHealingTest do
       assert state.status == :suspended_healing
       assert state.frozen_state.messages == [%{role: :user, content: "do something"}]
       assert state.frozen_state.task.title == "test task"
-      assert state.frozen_state.cost_usd == 0.5
-      assert state.frozen_state.tokens_used == 1000
     end
   end
 

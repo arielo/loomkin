@@ -77,6 +77,7 @@ defmodule Loomkin.Healing.ErrorClassifier do
 
   def should_heal?(%{category: category, severity: severity}, agent_state) do
     healing_enabled?(agent_state) and
+      category_allowed?(category, agent_state) and
       above_failure_threshold?(category, agent_state) and
       above_severity_threshold?(severity) and
       has_healing_budget?(agent_state)
@@ -151,7 +152,7 @@ defmodule Loomkin.Healing.ErrorClassifier do
   # -- Healability rules -------------------------------------------------------
 
   defp healable?(:compile_error, _context), do: true
-  defp healable?(:lint_error, _context), do: true
+  defp healable?(:lint_error, _context), do: false
   defp healable?(:test_failure, _context), do: true
 
   defp healable?(:command_failure, %{retry_count: n}) when is_integer(n) and n >= 2, do: false
@@ -212,8 +213,21 @@ defmodule Loomkin.Healing.ErrorClassifier do
   defp healing_enabled?(%{healing_enabled: false}), do: false
   defp healing_enabled?(_agent_state), do: true
 
+  defp category_allowed?(category, %{healing_categories: categories})
+       when is_list(categories) and categories != [] do
+    category in categories
+  end
+
+  defp category_allowed?(_category, _agent_state), do: true
+
   defp above_failure_threshold?(category, agent_state) do
-    threshold = Map.get(@failure_thresholds, category, 1)
+    # Use policy threshold if provided, otherwise fall back to default per-category thresholds
+    threshold =
+      case Map.get(agent_state, :failure_threshold) do
+        t when is_integer(t) and t > 0 -> t
+        _ -> Map.get(@failure_thresholds, category, 1)
+      end
+
     failure_count = Map.get(agent_state, :failure_count, 0)
     failure_count >= threshold
   end

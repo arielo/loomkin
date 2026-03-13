@@ -1052,12 +1052,16 @@ defmodule Loomkin.Teams.Agent do
     state = set_status_and_broadcast(state, :idle)
 
     # Publish healing complete signal
-    Loomkin.Signals.Agent.HealingComplete.new!(%{
-      agent_name: to_string(state.name),
-      team_id: state.team_id,
-      healing_summary: healing_summary
-    })
-    |> Loomkin.Signals.publish()
+    try do
+      Loomkin.Signals.Agent.HealingComplete.new!(%{
+        agent_name: to_string(state.name),
+        team_id: state.team_id,
+        healing_summary: healing_summary
+      })
+      |> Loomkin.Signals.publish()
+    rescue
+      _ -> :ok
+    end
 
     # Drain any messages queued during healing, then re-run the agent loop
     state = drain_healing_queue(state)
@@ -1265,10 +1269,7 @@ defmodule Loomkin.Teams.Agent do
 
     frozen_state = %{
       messages: msgs,
-      task: state.task,
-      context: state.context,
-      cost_usd: state.cost_usd,
-      tokens_used: state.tokens_used
+      task: state.task
     }
 
     state = %{
@@ -1283,14 +1284,37 @@ defmodule Loomkin.Teams.Agent do
     # Reply to caller if this was a synchronous send_message
     if from, do: GenServer.reply(from, {:ok, :suspended_healing})
 
-    # Publish healing requested signal
-    Loomkin.Signals.Agent.HealingRequested.new!(%{
-      agent_name: to_string(state.name),
-      team_id: state.team_id,
+    # Publish healing requested signal for UI
+    try do
+      Loomkin.Signals.Agent.HealingRequested.new!(%{
+        agent_name: to_string(state.name),
+        team_id: state.team_id,
+        classification: classification,
+        error_context: classification[:error_context] || %{}
+      })
+      |> Loomkin.Signals.publish()
+    rescue
+      _ -> :ok
+    end
+
+    # Trigger the orchestrator to start healing (S1 fix)
+    healing_policy = state.role_config.healing_policy
+
+    healing_context = %{
       classification: classification,
-      error_context: classification[:error_context] || %{}
-    })
-    |> Loomkin.Signals.publish()
+      error_context: classification[:error_context] || %{},
+      budget_usd: healing_policy[:budget_usd] || 0.50,
+      timeout_ms: healing_policy[:timeout_ms] || :timer.minutes(5),
+      max_attempts: healing_policy[:max_attempts] || 2
+    }
+
+    case Loomkin.Healing.Orchestrator.request_healing(state.team_id, state.name, healing_context) do
+      {:ok, session_id} ->
+        Logger.info("[Kin:agent] #{state.name} healing session started id=#{session_id}")
+
+      {:error, reason} ->
+        Logger.warning("[Kin:agent] #{state.name} failed to start healing: #{inspect(reason)}")
+    end
 
     {:noreply, state}
   end
@@ -2490,9 +2514,15 @@ defmodule Loomkin.Teams.Agent do
     error_text = if is_binary(reason), do: reason, else: inspect(reason)
     classification = ErrorClassifier.classify(error_text)
 
+    healing_policy = snapshot.healing_policy || %{}
+
     agent_state = %{
       failure_count: snapshot.failure_count,
-      role: snapshot.role
+      role: snapshot.role,
+      healing_enabled: Map.get(healing_policy, :enabled, true),
+      healing_categories: Map.get(healing_policy, :categories, []),
+      failure_threshold: Map.get(healing_policy, :failure_threshold),
+      healing_budget_remaining: Map.get(healing_policy, :budget_usd, 0.50)
     }
 
     if ErrorClassifier.should_heal?(classification, agent_state) do
@@ -2570,7 +2600,8 @@ defmodule Loomkin.Teams.Agent do
       model: state.model,
       task: state.task,
       failure_count: state.failure_count,
-      role: state.role
+      role: state.role,
+      healing_policy: state.role_config && state.role_config.healing_policy
     }
   end
 

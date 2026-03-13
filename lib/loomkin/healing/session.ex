@@ -9,7 +9,6 @@ defmodule Loomkin.Healing.Session do
   @type status ::
           :diagnosing
           | :fixing
-          | :confirming
           | :complete
           | :failed
           | :timed_out
@@ -24,8 +23,8 @@ defmodule Loomkin.Healing.Session do
           status: status(),
           diagnosis: map() | nil,
           fix_result: map() | nil,
-          diagnostician_id: String.t() | nil,
-          fixer_id: String.t() | nil,
+          diagnostician_pid: pid() | nil,
+          fixer_pid: pid() | nil,
           started_at: DateTime.t(),
           budget_remaining_usd: float(),
           max_iterations: non_neg_integer(),
@@ -42,8 +41,8 @@ defmodule Loomkin.Healing.Session do
     :status,
     :diagnosis,
     :fix_result,
-    :diagnostician_id,
-    :fixer_id,
+    :diagnostician_pid,
+    :fixer_pid,
     :started_at,
     budget_remaining_usd: 0.50,
     max_iterations: 15,

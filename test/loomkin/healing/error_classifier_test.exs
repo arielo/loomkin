@@ -56,7 +56,7 @@ defmodule Loomkin.Healing.ErrorClassifierTest do
       result = ErrorClassifier.classify("** (Mix) mix format failed for lib/foo.ex")
       assert result.category == :lint_error
       assert result.severity == :low
-      assert result.healable == true
+      assert result.healable == false
     end
 
     test "detects credo warnings" do

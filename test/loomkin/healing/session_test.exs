@@ -22,8 +22,8 @@ defmodule Loomkin.Healing.SessionTest do
       assert session.status == nil
       assert session.diagnosis == nil
       assert session.fix_result == nil
-      assert session.diagnostician_id == nil
-      assert session.fixer_id == nil
+      assert session.diagnostician_pid == nil
+      assert session.fixer_pid == nil
       assert session.started_at == nil
     end
   end
@@ -41,8 +41,8 @@ defmodule Loomkin.Healing.SessionTest do
         status: :diagnosing,
         diagnosis: nil,
         fix_result: nil,
-        diagnostician_id: nil,
-        fixer_id: nil,
+        diagnostician_pid: nil,
+        fixer_pid: nil,
         started_at: now,
         budget_remaining_usd: 0.25,
         max_iterations: 10,
@@ -72,7 +72,7 @@ defmodule Loomkin.Healing.SessionTest do
 
   describe "status transitions" do
     test "all valid status values can be set" do
-      statuses = [:diagnosing, :fixing, :confirming, :complete, :failed, :timed_out, :cancelled]
+      statuses = [:diagnosing, :fixing, :complete, :failed, :timed_out, :cancelled]
 
       for status <- statuses do
         session = %Session{status: status}

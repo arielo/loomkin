@@ -1277,7 +1277,14 @@ defmodule LoomkinWeb.WorkspaceLive do
     socket = update_agent_card(socket, agent_name, %{healing_phase: :confirming})
 
     file_count = length(files_changed)
-    files_display = Enum.join(files_changed, ", ")
+
+    files_display =
+      case files_changed do
+        [] -> "none"
+        [f] -> f
+        [f1, f2] -> "#{f1}, #{f2}"
+        [f | _] -> "#{f} and #{file_count - 1} more"
+      end
 
     event = %{
       id: Ecto.UUID.generate(),
@@ -1300,11 +1307,16 @@ defmodule LoomkinWeb.WorkspaceLive do
   def handle_info(%Jido.Signal{type: "healing.session.complete"} = sig, socket) do
     %{agent_name: agent_name, outcome: outcome, duration_ms: duration_ms} = sig.data
 
-    socket =
-      update_agent_card(socket, agent_name, %{
-        healing_phase: nil,
-        healing_error_category: nil
-      })
+    card_updates =
+      case outcome do
+        :healed ->
+          %{healing_phase: nil, healing_error_category: nil}
+
+        _ ->
+          %{healing_phase: nil, healing_error_category: nil, status: :error}
+      end
+
+    socket = update_agent_card(socket, agent_name, card_updates)
 
     {event_type, content} =
       case outcome do
@@ -1319,6 +1331,9 @@ defmodule LoomkinWeb.WorkspaceLive do
         :timed_out ->
           {:healing_failed,
            "Healing timed out: #{agent_name} escalated (#{format_duration(duration_ms)})"}
+
+        :cancelled ->
+          {:healing_failed, "Healing cancelled: #{agent_name} (#{format_duration(duration_ms)})"}
       end
 
     event = %{

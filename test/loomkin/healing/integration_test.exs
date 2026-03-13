@@ -10,6 +10,19 @@ defmodule Loomkin.Healing.IntegrationTest do
   alias Loomkin.Healing.Orchestrator
   alias Loomkin.Teams.Agent
 
+  setup do
+    prev = Application.get_env(:loomkin, :healing_ephemeral_agent)
+    Application.put_env(:loomkin, :healing_ephemeral_agent, Loomkin.Healing.EphemeralAgentStub)
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:loomkin, :healing_ephemeral_agent, prev),
+        else: Application.delete_env(:loomkin, :healing_ephemeral_agent)
+    end)
+
+    :ok
+  end
+
   defp unique_team_id do
     "test-integ-#{:erlang.unique_integer([:positive])}"
   end
@@ -31,10 +44,7 @@ defmodule Loomkin.Healing.IntegrationTest do
     :sys.replace_state(pid, fn state ->
       frozen_state = %{
         messages: state.messages,
-        task: state.task,
-        context: state.context,
-        cost_usd: state.cost_usd,
-        tokens_used: state.tokens_used
+        task: state.task
       }
 
       %{
