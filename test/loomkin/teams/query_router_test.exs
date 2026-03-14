@@ -17,10 +17,14 @@ defmodule Loomkin.Teams.QueryRouterTest do
     end
 
     on_exit(fn ->
-      DynamicSupervisor.which_children(Loomkin.Teams.AgentSupervisor)
-      |> Enum.each(fn {_, pid, _, _} ->
-        DynamicSupervisor.terminate_child(Loomkin.Teams.AgentSupervisor, pid)
-      end)
+      try do
+        DynamicSupervisor.which_children(Loomkin.Teams.AgentSupervisor)
+        |> Enum.each(fn {_, pid, _, _} ->
+          DynamicSupervisor.terminate_child(Loomkin.Teams.AgentSupervisor, pid)
+        end)
+      catch
+        :exit, _ -> :ok
+      end
 
       Loomkin.Teams.TableRegistry.delete_table(team_id)
     end)
