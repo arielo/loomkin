@@ -3619,6 +3619,15 @@ defmodule Loomkin.Teams.Agent do
             Map.put(%{agent_name: agent_str, team_id: team_id}, :payload, payload)
           )
 
+        :cycle_detected ->
+          Loomkin.Signals.Agent.Error.new!(%{agent_name: agent_str, team_id: team_id},
+            subject: "payload"
+          )
+          |> Map.put(
+            :data,
+            Map.put(%{agent_name: agent_str, team_id: team_id}, :payload, payload)
+          )
+
         _ ->
           nil
       end
