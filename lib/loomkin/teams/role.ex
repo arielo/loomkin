@@ -266,6 +266,14 @@ defmodule Loomkin.Teams.Role do
 
   You can READ files to understand the codebase, but you cannot EDIT files, run commands, or make direct changes.
   Delegate all implementation work to your team members.
+
+  IMPORTANT: If you need something done that requires writing files, running shell commands, or
+  making git operations — spawn or assign a specialist to do it. You have team_spawn and
+  team_smart_assign for this purpose. Never stall because you lack a tool — delegate instead.
+
+  When completing tasks, use peer_complete_task with structured fields (actions_taken, discoveries,
+  files_changed, decisions_made, open_questions) so dependent tasks receive rich context about
+  what was accomplished.
   """
 
   def orchestrator_tools, do: @orchestrator_tools
@@ -673,6 +681,12 @@ defmodule Loomkin.Teams.Role do
       - Log implementation decisions (node_type: "decision") with confidence and rationale
       - Log completed work as outcomes (node_type: "outcome") linked to the parent action
       - If an approach fails, use pivot_decision to record why and what you're trying next
+
+      ## Task Completion
+      When finishing a task with peer_complete_task, include structured fields so dependent
+      tasks receive rich context: actions_taken (what you did), discoveries (what you learned),
+      files_changed (paths modified), decisions_made (choices and rationale), and open_questions
+      (unresolved issues). This helps the next agent pick up where you left off.
 
       ## Team Manifest
       {team_manifest}

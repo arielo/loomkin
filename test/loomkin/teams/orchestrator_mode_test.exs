@@ -50,6 +50,13 @@ defmodule Loomkin.Teams.OrchestratorModeTest do
       assert Loomkin.Tools.SearchKeepers in tools
     end
 
+    test "includes conversation and collaboration tools" do
+      tools = Role.orchestrator_tools()
+      assert Loomkin.Tools.SpawnConversation in tools
+      assert Loomkin.Tools.CollectiveDecision in tools
+      assert Loomkin.Tools.AskUser in tools
+    end
+
     test "excludes write tools" do
       tools = Role.orchestrator_tools()
       refute Loomkin.Tools.FileWrite in tools
@@ -77,6 +84,8 @@ defmodule Loomkin.Teams.OrchestratorModeTest do
       assert prompt =~ "READ files"
       assert prompt =~ "cannot EDIT"
       assert prompt =~ "Delegate"
+      assert prompt =~ "spawn or assign a specialist"
+      assert prompt =~ "peer_complete_task"
     end
   end
 

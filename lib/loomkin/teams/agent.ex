@@ -2935,11 +2935,13 @@ defmodule Loomkin.Teams.Agent do
     end
   end
 
+  @non_specialist_roles [:lead, :concierge, :orienter, "lead", "concierge", "orienter"]
+
   defp has_specialists?(team_id, my_name) do
     Manager.list_agents(team_id)
     |> Enum.any?(fn agent ->
       to_string(agent.name) != to_string(my_name) and
-        agent.role not in [:lead, :concierge, "lead", "concierge"]
+        agent.role not in @non_specialist_roles
     end)
   end
 

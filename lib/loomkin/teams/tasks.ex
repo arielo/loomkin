@@ -414,7 +414,16 @@ defmodule Loomkin.Teams.Tasks do
         |> Enum.reject(fn id -> id in blocked_ids end)
 
       if newly_unblocked != [] do
-        Comms.broadcast_task_event(team_id, {:tasks_unblocked, newly_unblocked})
+        # Gather predecessor outputs for tasks with :requires_output deps
+        predecessor_outputs =
+          newly_unblocked
+          |> Enum.map(fn id -> {id, get_predecessor_outputs(id)} end)
+          |> Enum.into(%{})
+
+        Comms.broadcast_task_event(
+          team_id,
+          {:tasks_unblocked, newly_unblocked, predecessor_outputs}
+        )
       end
     end
   end
