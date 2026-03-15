@@ -9,64 +9,77 @@
       <%!-- Loom thread mark — three interwoven strands --%>
       <div class="inline-block mb-4">
         <svg
-          width="48"
-          height="48"
-          viewBox="0 0 48 48"
+          width="52"
+          height="52"
+          viewBox="0 0 52 52"
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
-          class="drop-shadow-[0_0_12px_rgba(124,58,237,0.3)]"
+          class="drop-shadow-[0_0_14px_rgba(124,58,237,0.3)]"
         >
-          <path
-            d="M12 8C12 8 18 16 24 24C30 32 36 40 36 40"
-            stroke="url(#thread1)"
-            stroke-width="2.5"
-            stroke-linecap="round"
+          <%!-- Woven circle: three orbital arcs that weave over/under each other --%>
+          <ellipse
+            cx="26"
+            cy="26"
+            rx="18"
+            ry="8"
+            transform="rotate(-30 26 26)"
+            stroke="url(#wv1r)"
+            stroke-width="2"
+            fill="none"
           />
-          <path
-            d="M24 8C24 8 20 16 18 24C16 32 20 40 24 40"
-            stroke="url(#thread2)"
-            stroke-width="2.5"
-            stroke-linecap="round"
+          <ellipse
+            cx="26"
+            cy="26"
+            rx="18"
+            ry="8"
+            transform="rotate(30 26 26)"
+            stroke="url(#wv2r)"
+            stroke-width="2"
+            fill="none"
           />
-          <path
-            d="M36 8C36 8 30 16 24 24C18 32 12 40 12 40"
-            stroke="url(#thread3)"
-            stroke-width="2.5"
-            stroke-linecap="round"
+          <ellipse
+            cx="26"
+            cy="26"
+            rx="18"
+            ry="8"
+            transform="rotate(90 26 26)"
+            stroke="url(#wv3r)"
+            stroke-width="2"
+            fill="none"
           />
           <defs>
             <linearGradient
-              id="thread1"
-              x1="12"
-              y1="8"
-              x2="36"
-              y2="40"
+              id="wv1r"
+              x1="8"
+              y1="18"
+              x2="44"
+              y2="34"
               gradientUnits="userSpaceOnUse"
             >
               <stop stop-color="#7C3AED" />
               <stop offset="1" stop-color="#a78bfa" />
             </linearGradient>
             <linearGradient
-              id="thread2"
-              x1="24"
-              y1="8"
-              x2="24"
-              y2="40"
+              id="wv2r"
+              x1="8"
+              y1="34"
+              x2="44"
+              y2="18"
               gradientUnits="userSpaceOnUse"
             >
-              <stop stop-color="#22d3ee" />
+              <stop stop-color="#22d3ee" stop-opacity="0.7" />
               <stop offset="1" stop-color="#7C3AED" />
             </linearGradient>
             <linearGradient
-              id="thread3"
-              x1="36"
+              id="wv3r"
+              x1="26"
               y1="8"
-              x2="12"
-              y2="40"
+              x2="26"
+              y2="44"
               gradientUnits="userSpaceOnUse"
             >
-              <stop stop-color="#a78bfa" />
-              <stop offset="1" stop-color="#22d3ee" />
+              <stop stop-color="#a78bfa" stop-opacity="0.6" />
+              <stop offset="1" stop-color="#22d3ee" stop-opacity="0.8" />
             </linearGradient>
           </defs>
         </svg>
