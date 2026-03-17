@@ -35,6 +35,7 @@ defmodule Loomkin.Verification.Loop do
     :task_id,
     :test_command,
     :success_criteria,
+    :project_path,
     :timeout_ref,
     :test_task,
     :test_task_pid,
@@ -101,6 +102,7 @@ defmodule Loomkin.Verification.Loop do
     task_id = Keyword.fetch!(opts, :task_id)
     test_command = Keyword.fetch!(opts, :test_command)
     success_criteria = Keyword.get(opts, :success_criteria)
+    project_path = Keyword.get(opts, :project_path)
     max_iterations = Keyword.get(opts, :max_iterations, @default_max_iterations)
     timeout_ms = Keyword.get(opts, :timeout_ms, @default_timeout_ms)
 
@@ -111,6 +113,7 @@ defmodule Loomkin.Verification.Loop do
       task_id: task_id,
       test_command: test_command,
       success_criteria: success_criteria,
+      project_path: project_path,
       max_iterations: max_iterations,
       status: :running
     }
@@ -233,9 +236,11 @@ defmodule Loomkin.Verification.Loop do
     team_id = state.team_id
     test_command = state.test_command
 
+    project_path = state.project_path
+
     task =
       Task.Supervisor.async_nolink(Loomkin.Healing.TaskSupervisor, fn ->
-        run_test(test_command, team_id)
+        run_test(test_command, team_id, project_path)
       end)
 
     {:noreply, %{state | test_task: task.ref, test_task_pid: task.pid}}
@@ -331,10 +336,12 @@ defmodule Loomkin.Verification.Loop do
     {:noreply, state}
   end
 
-  defp run_test(test_command, team_id) do
-    case Loomkin.Teams.Manager.get_team_project_path(team_id) do
-      path when is_binary(path) ->
-        run_test_in_path(test_command, path)
+  defp run_test(test_command, team_id, project_path) do
+    path = project_path || Loomkin.Teams.Manager.get_team_project_path(team_id)
+
+    case path do
+      p when is_binary(p) ->
+        run_test_in_path(test_command, p)
 
       _ ->
         %{passed: false, output: "Cannot resolve project path for team #{team_id}", exit_code: -1}

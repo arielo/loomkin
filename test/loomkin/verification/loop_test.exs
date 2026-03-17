@@ -16,6 +16,7 @@ defmodule Loomkin.Verification.LoopTest do
         team_id: @team_id,
         task_id: task_id,
         test_command: Keyword.get(overrides, :test_command, "true"),
+        project_path: Keyword.get(overrides, :project_path, "/tmp"),
         max_iterations: Keyword.get(overrides, :max_iterations, 10),
         timeout_ms: Keyword.get(overrides, :timeout_ms, :timer.minutes(5))
       ]
