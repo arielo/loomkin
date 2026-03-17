@@ -1,14 +1,17 @@
 defmodule Loomkin.Teams.ContextRetrieval do
   @moduledoc "How agents find and retrieve context from keepers."
 
-  alias Loomkin.Teams.ContextKeeper
+  require Logger
 
-  @default_max_tokens 8000
+  import Ecto.Query
+
+  alias Loomkin.Teams.ContextKeeper
 
   @doc """
   List all keepers for a team.
 
-  Returns a list of maps: `[%{id: id, topic: topic, source_agent: source_agent, token_count: count}]`
+  Returns a list of maps with staleness info computed lazily:
+  `[%{id: id, topic: topic, source_agent: source_agent, token_count: count, staleness: score, staleness_state: atom}]`
   """
   def list_keepers(team_id) do
     Registry.select(Loomkin.Teams.AgentRegistry, [
@@ -19,12 +22,23 @@ defmodule Loomkin.Teams.ContextRetrieval do
       # name is "keeper:<id>"
       id = String.replace_prefix(to_string(name), "keeper:", "")
 
+      staleness_info =
+        try do
+          ContextKeeper.get_staleness(pid)
+        rescue
+          _ -> %{score: 0, state: :fresh}
+        catch
+          :exit, _ -> %{score: 0, state: :fresh}
+        end
+
       %{
         id: id,
         pid: pid,
         topic: meta[:topic] || "unnamed",
         source_agent: meta[:source_agent] || "unknown",
-        token_count: meta[:tokens] || 0
+        token_count: meta[:tokens] || 0,
+        staleness: staleness_info.score,
+        staleness_state: staleness_info.state
       }
     end)
   end
@@ -69,13 +83,13 @@ defmodule Loomkin.Teams.ContextRetrieval do
   """
   def retrieve(team_id, query, opts \\ []) do
     keeper_id = Keyword.get(opts, :keeper_id)
-    _max_tokens = Keyword.get(opts, :max_tokens, @default_max_tokens)
     mode = Keyword.get(opts, :mode, detect_mode(query))
+    agent_name = Keyword.get(opts, :agent_name)
 
     if keeper_id do
-      retrieve_from_keeper(team_id, keeper_id, query, mode)
+      retrieve_from_keeper(team_id, keeper_id, query, mode, agent_name)
     else
-      retrieve_from_best(team_id, query, mode)
+      retrieve_from_best(team_id, query, mode, agent_name)
     end
   end
 
@@ -95,7 +109,9 @@ defmodule Loomkin.Teams.ContextRetrieval do
 
   Returns `{:ok, answer}` or `{:error, :not_found}`.
   """
-  def synthesize(team_id, question) do
+  def synthesize(team_id, question, opts \\ []) do
+    agent_name = Keyword.get(opts, :agent_name)
+
     top_keepers =
       search(team_id, question)
       |> Enum.filter(&(&1.relevance > 0))
@@ -106,6 +122,12 @@ defmodule Loomkin.Teams.ContextRetrieval do
         {:error, :not_found}
 
       keepers ->
+        if agent_name do
+          Enum.each(keepers, fn k ->
+            ContextKeeper.record_access(k.pid, agent_name, :synthesize)
+          end)
+        end
+
         sections =
           retrieve_from_multiple(keepers, question)
           |> Enum.reject(&(&1.content == ""))
@@ -117,7 +139,75 @@ defmodule Loomkin.Teams.ContextRetrieval do
     end
   end
 
+  @doc """
+  Detect keepers with > 60% topic word overlap as merge candidates.
+
+  Returns a list of `{keeper_a, keeper_b, overlap_pct}` tuples sorted by overlap descending.
+  """
+  def detect_merge_candidates(team_id) do
+    keepers = list_keepers(team_id)
+
+    for a <- keepers,
+        b <- keepers,
+        a.id < b.id,
+        overlap = topic_overlap_pct(a.topic, b.topic),
+        overlap > 0.6 do
+      {a, b, Float.round(overlap * 100, 1)}
+    end
+    |> Enum.sort_by(&elem(&1, 2), :desc)
+  end
+
+  @doc """
+  Merge keeper `source` into `target`. Appends source messages to target,
+  combines metadata, and archives the source.
+
+  Returns `:ok` or `{:error, reason}`.
+  """
+  def merge_keepers(target_pid, source_pid) do
+    source_state = ContextKeeper.get_state(source_pid)
+
+    case ContextKeeper.store(target_pid, source_state.messages, %{
+           "merged_from" => source_state.id,
+           "merged_topic" => source_state.topic,
+           "merged_at" => DateTime.to_iso8601(DateTime.utc_now())
+         }) do
+      :ok ->
+        ContextKeeper.record_access(target_pid, "merge", :raw)
+
+        # Flush merged messages to DB before archiving source
+        ContextKeeper.flush_persist(target_pid)
+
+        alias Loomkin.Schemas.ContextKeeper, as: KeeperSchema
+
+        KeeperSchema
+        |> where([k], k.id == ^source_state.id)
+        |> Loomkin.Repo.update_all(set: [status: "archived"])
+
+        GenServer.stop(source_pid, :normal)
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("[ContextRetrieval] merge store failed: #{inspect(reason)}")
+        {:error, reason}
+    end
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
   # --- Private ---
+
+  defp topic_overlap_pct(topic_a, topic_b) do
+    words_a = topic_a |> String.downcase() |> String.split(~r/\s+/, trim: true) |> MapSet.new()
+    words_b = topic_b |> String.downcase() |> String.split(~r/\s+/, trim: true) |> MapSet.new()
+
+    union_size = words_a |> MapSet.union(words_b) |> MapSet.size()
+
+    if union_size == 0 do
+      0.0
+    else
+      words_a |> MapSet.intersection(words_b) |> MapSet.size() |> Kernel./(union_size)
+    end
+  end
 
   defp retrieve_from_multiple(keepers, query) do
     keepers
@@ -206,9 +296,11 @@ defmodule Loomkin.Teams.ContextRetrieval do
     end
   end
 
-  defp retrieve_from_keeper(team_id, keeper_id, query, mode) do
+  defp retrieve_from_keeper(team_id, keeper_id, query, mode, agent_name) do
     case Registry.lookup(Loomkin.Teams.AgentRegistry, {team_id, "keeper:#{keeper_id}"}) do
       [{pid, _meta}] ->
+        if agent_name, do: ContextKeeper.record_access(pid, agent_name, mode)
+
         case mode do
           :smart -> ContextKeeper.smart_retrieve(pid, query)
           :raw -> ContextKeeper.retrieve(pid, query)
@@ -219,9 +311,11 @@ defmodule Loomkin.Teams.ContextRetrieval do
     end
   end
 
-  defp retrieve_from_best(team_id, query, mode) do
+  defp retrieve_from_best(team_id, query, mode, agent_name) do
     case search(team_id, query) |> Enum.filter(&(&1.relevance > 0)) do
       [best | _rest] ->
+        if agent_name, do: ContextKeeper.record_access(best.pid, agent_name, mode)
+
         case mode do
           :smart -> ContextKeeper.smart_retrieve(best.pid, query)
           :raw -> ContextKeeper.retrieve(best.pid, query)

@@ -226,11 +226,15 @@ defmodule Loomkin.Teams.TasksTest do
       Tasks.assign_task(blocker.id, "coder")
       Tasks.complete_task(blocker.id, "done")
 
+      # Unblocking now goes through UpstreamVerifier (async) before broadcasting.
+      # The verifier always unblocks dependents regardless of pass/fail, but it
+      # runs in a Task process so we need a longer timeout.
       assert_receive {:signal,
                       %Jido.Signal{
                         type: "collaboration.peer.message",
                         data: %{message: {:tasks_unblocked, ids, _predecessor_outputs}}
-                      }}
+                      }},
+                     5_000
 
       assert blocked.id in ids
     end

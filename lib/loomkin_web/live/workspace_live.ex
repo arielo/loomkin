@@ -621,8 +621,6 @@ defmodule LoomkinWeb.WorkspaceLive do
               updated_messages
             )
 
-          socket = assign(socket, context_info: context_info)
-
           # Auto-title page from first user message
           socket =
             if socket.assigns.messages == [] do
@@ -638,12 +636,6 @@ defmodule LoomkinWeb.WorkspaceLive do
             else
               socket
             end
-
-          context_info =
-            Loomkin.Session.ContextWindow.context_usage_info(
-              socket.assigns.model,
-              updated_messages
-            )
 
           {:noreply,
            socket
@@ -704,25 +696,9 @@ defmodule LoomkinWeb.WorkspaceLive do
     end
   end
 
-  @valid_tabs ~w(files diff graph)
+  @valid_tabs ~w(files diff graph context)
   def handle_event("switch_tab", %{"tab" => tab}, socket) when tab in @valid_tabs do
     tab_atom = String.to_existing_atom(tab)
-
-    socket =
-      if tab_atom == :team and socket.assigns.buffered_activity_events != [] do
-        # Flush buffered events to the component now that it's visible
-        events = Enum.reverse(socket.assigns.buffered_activity_events)
-
-        send_update(LoomkinWeb.TeamActivityComponent,
-          id: "team-activity",
-          reset_events: events
-        )
-
-        assign(socket, buffered_activity_events: [])
-      else
-        socket
-      end
-
     {:noreply, assign(socket, active_tab: tab_atom)}
   end
 
@@ -2723,7 +2699,13 @@ defmodule LoomkinWeb.WorkspaceLive do
   end
 
   def handle_info(:new_session, socket) do
-    {:noreply, push_navigate(socket, to: ~p"/")}
+    project_path = socket.assigns[:project_path]
+
+    if project_path do
+      {:noreply, push_navigate(socket, to: ~p"/sessions/new?#{%{project_path: project_path}}")}
+    else
+      {:noreply, push_navigate(socket, to: ~p"/projects")}
+    end
   end
 
   def handle_info({:new_session_for_project, path}, socket) do
@@ -3302,6 +3284,8 @@ defmodule LoomkinWeb.WorkspaceLive do
 
   # New event types for activity feed
   def handle_info({:keeper_created, _payload} = event, socket) do
+    forward_to_context_library(socket)
+
     {:noreply, socket |> forward_to_activity(event) |> forward_to_cards_and_comms(event)}
   end
 
@@ -3807,14 +3791,6 @@ defmodule LoomkinWeb.WorkspaceLive do
 
     debug_signals = Enum.take([entry | socket.assigns.debug_signals], 50)
 
-    # Auto-open debug panel on first signal
-    socket =
-      if socket.assigns.debug_signals == [] and not socket.assigns.debug_panel_open do
-        assign(socket, :debug_panel_open, true)
-      else
-        socket
-      end
-
     assign(socket, :debug_signals, debug_signals)
   end
 
@@ -4125,14 +4101,6 @@ defmodule LoomkinWeb.WorkspaceLive do
           >
             <.icon name="hero-bookmark-mini" class="w-3.5 h-3.5" /> Save Chat
           </button>
-
-          <%!-- Session switcher --%>
-          <.live_component
-            module={LoomkinWeb.SessionSwitcherComponent}
-            id="session-switcher"
-            session_id={@session_id}
-            project_path={@project_path}
-          />
         </div>
       </header>
 
@@ -4220,6 +4188,12 @@ defmodule LoomkinWeb.WorkspaceLive do
         <%= if @mode == :solo do %>
           <%!-- Left: Chat + Input --%>
           <div class="flex-1 flex flex-col min-w-0 min-h-0 bg-surface-0">
+            <.live_component
+              module={LoomkinWeb.SessionSwitcherComponent}
+              id="session-switcher"
+              session_id={@session_id}
+              project_path={@project_path}
+            />
             <div class="flex-1 overflow-auto min-h-0">
               <.live_component
                 module={LoomkinWeb.ChatComponent}
@@ -4286,26 +4260,51 @@ defmodule LoomkinWeb.WorkspaceLive do
           />
         <% else %>
           <%!-- Mission Control Left: Agent Cards + Comms + Composer --%>
-          <div class="flex-1 flex flex-col min-w-0 min-h-0 border-r border-subtle overflow-hidden">
-            <.live_component
-              module={LoomkinWeb.MissionControlPanelComponent}
-              id="mission-control-panel"
-              agent_cards={@agent_cards}
-              concierge_card_names={@concierge_card_names}
-              system_card_names={@system_card_names}
-              worker_card_names={@worker_card_names}
-              comms_event_count={@comms_event_count}
-              comms_stream={@streams.comms_events}
-              focused_agent={@focused_agent}
-              kin_agents={@kin_agents}
-              cached_agents={@cached_agents}
-              active_team_id={@active_team_id}
-              leader_approval_pending={@leader_approval_pending}
-              collab_health={@collab_health}
-            />
+          <div
+            id="mc-split-container"
+            class="flex-1 flex flex-col min-w-0 min-h-0 border-r border-subtle overflow-hidden"
+            phx-hook="VerticalSplit"
+          >
+            <div id="mc-top-pane" class="flex-shrink-0 overflow-hidden flex flex-col">
+              <.live_component
+                module={LoomkinWeb.MissionControlPanelComponent}
+                id="mission-control-panel"
+                agent_cards={@agent_cards}
+                concierge_card_names={@concierge_card_names}
+                system_card_names={@system_card_names}
+                worker_card_names={@worker_card_names}
+                comms_event_count={@comms_event_count}
+                comms_stream={@streams.comms_events}
+                focused_agent={@focused_agent}
+                kin_agents={@kin_agents}
+                cached_agents={@cached_agents}
+                active_team_id={@active_team_id}
+                leader_approval_pending={@leader_approval_pending}
+                collab_health={@collab_health}
+              />
+            </div>
+
+            <%!-- Drag handle --%>
+            <div
+              id="mc-split-handle"
+              class="flex-shrink-0 h-1.5 cursor-row-resize flex items-center justify-center group hover:bg-violet-500/20 active:bg-violet-500/30 transition-[background] duration-150 border-y border-subtle"
+            >
+              <div class="w-8 h-0.5 rounded-full bg-zinc-600 group-hover:bg-violet-400 group-active:bg-violet-400 transition-[background] duration-150">
+              </div>
+            </div>
 
             <%!-- Chat + Composer column --%>
-            <div class="flex-shrink-0 flex flex-col min-w-0 border-r border-subtle">
+            <div
+              id="mc-bottom-pane"
+              class="flex flex-col min-w-0 border-r border-subtle"
+              style="flex: 1 1 auto; min-height: 150px;"
+            >
+              <.live_component
+                module={LoomkinWeb.SessionSwitcherComponent}
+                id="session-switcher"
+                session_id={@session_id}
+                project_path={@project_path}
+              />
               <div class="flex-1 overflow-auto min-h-0">
                 <.live_component
                   module={LoomkinWeb.ChatComponent}
@@ -5913,6 +5912,22 @@ defmodule LoomkinWeb.WorkspaceLive do
     if tid do
       try do
         send_update(LoomkinWeb.TeamCostComponent, id: "team-cost", team_id: tid)
+      rescue
+        ArgumentError -> :ok
+      end
+    end
+  end
+
+  defp forward_to_context_library(socket) do
+    tid = socket.assigns[:active_team_id] || socket.assigns[:team_id]
+
+    if tid do
+      try do
+        send_update(LoomkinWeb.ContextLibraryComponent,
+          id: "context-library",
+          team_id: tid,
+          reload: true
+        )
       rescue
         ArgumentError -> :ok
       end

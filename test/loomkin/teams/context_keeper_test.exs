@@ -202,6 +202,7 @@ defmodule Loomkin.Teams.ContextKeeperTest do
       assert result =~ "BEAM"
     end
 
+    @tag :llm_dependent
     test "does not modify state after smart retrieval" do
       messages = [
         %{role: :user, content: "hello world"},

@@ -1,6 +1,6 @@
 defmodule LoomkinWeb.SidebarPanelComponent do
   @moduledoc """
-  LiveComponent for the sidebar tab panel (Files, Diff, Graph).
+  LiveComponent for the sidebar tab panel (Files, Diff, Graph, Context).
 
   Renders the outer sidebar container, tab bar, and tab content.
   All state is passed as assigns from the parent. Tab events and file
@@ -30,7 +30,7 @@ defmodule LoomkinWeb.SidebarPanelComponent do
         class="flex items-center gap-0.5 px-1.5 py-1 overflow-x-auto flex-shrink-0 border-b border-subtle"
       >
         <button
-          :for={tab <- [:files, :diff, :graph]}
+          :for={tab <- [:files, :diff, :graph, :context]}
           role="tab"
           aria-selected={to_string(@active_tab == tab)}
           aria-controls={"tab-panel-#{tab}"}
@@ -38,12 +38,16 @@ defmodule LoomkinWeb.SidebarPanelComponent do
           phx-click="switch_tab"
           phx-value-tab={tab}
           phx-target={@myself}
-          class={"relative flex items-center gap-1 px-2 py-1.5 text-[11px] font-medium rounded-md transition-all duration-200 interactive " <>
+          class={[
+            "relative flex items-center gap-1 px-2 py-1.5 text-[11px] font-medium rounded-md transition-all duration-200 interactive",
             if(@active_tab == tab,
-              do: "text-brand after:absolute after:bottom-0 after:left-1 after:right-1 after:h-[1.5px] after:rounded-full after:bg-violet-500",
-              else: "text-muted")}
+              do:
+                "text-brand after:absolute after:bottom-0 after:left-1 after:right-1 after:h-[1.5px] after:rounded-full after:bg-violet-500",
+              else: "text-muted"
+            )
+          ]}
         >
-          <span aria-hidden="true">{tab_icon(tab)}</span>
+          <span aria-hidden="true"><.icon name={tab_icon(tab)} class="w-3.5 h-3.5" /></span>
           <span class="text-[10px]">{tab_label(tab)}</span>
         </button>
       </div>
@@ -54,7 +58,10 @@ defmodule LoomkinWeb.SidebarPanelComponent do
         id={"tab-panel-#{@active_tab}"}
         aria-labelledby={"tab-#{@active_tab}"}
         tabindex="0"
-        class="flex-1 overflow-auto p-3 tab-content-enter bg-surface-0"
+        class={[
+          "flex-1 overflow-auto tab-content-enter bg-surface-0",
+          @active_tab != :context && "p-3"
+        ]}
         phx-hook="TabTransition"
       >
         {render_tab(@active_tab, assigns)}
@@ -69,7 +76,10 @@ defmodule LoomkinWeb.SidebarPanelComponent do
     {:noreply, socket}
   end
 
-  def handle_event("graph_sub_tab", %{"tab" => tab}, socket) do
+  @valid_graph_sub_tabs ~w(tasks decisions)
+
+  def handle_event("graph_sub_tab", %{"tab" => tab}, socket)
+      when tab in @valid_graph_sub_tabs do
     sub_tab = String.to_existing_atom(tab)
     {:noreply, assign(socket, graph_sub_tab: sub_tab)}
   end
@@ -96,18 +106,15 @@ defmodule LoomkinWeb.SidebarPanelComponent do
 
   # --- Tab helpers ---
 
-  defp tab_icon(:files),
-    do: raw("<span class=\"hero-folder-mini inline-block w-3.5 h-3.5\"></span>")
-
-  defp tab_icon(:diff),
-    do: raw("<span class=\"hero-code-bracket-mini inline-block w-3.5 h-3.5\"></span>")
-
-  defp tab_icon(:graph),
-    do: raw("<span class=\"hero-share-mini inline-block w-3.5 h-3.5\"></span>")
+  defp tab_icon(:files), do: "hero-folder-mini"
+  defp tab_icon(:diff), do: "hero-code-bracket-mini"
+  defp tab_icon(:graph), do: "hero-share-mini"
+  defp tab_icon(:context), do: "hero-circle-stack-mini"
 
   defp tab_label(:files), do: "Files"
   defp tab_label(:diff), do: "Diff"
   defp tab_label(:graph), do: "Graph"
+  defp tab_label(:context), do: "Context"
 
   defp render_tab(:files, assigns) do
     ~H"""
@@ -166,10 +173,13 @@ defmodule LoomkinWeb.SidebarPanelComponent do
           phx-click="graph_sub_tab"
           phx-value-tab={sub}
           phx-target={@myself}
-          class={"px-2 py-1 text-[10px] font-medium rounded transition-colors duration-150 " <>
+          class={[
+            "px-2 py-1 text-[10px] font-medium rounded transition-colors duration-150",
             if(@graph_sub_tab == sub,
               do: "text-brand bg-brand/10",
-              else: "text-muted hover:text-gray-300")}
+              else: "text-muted hover:text-gray-300"
+            )
+          ]}
         >
           {graph_sub_tab_label(sub)}
         </button>
@@ -178,6 +188,16 @@ defmodule LoomkinWeb.SidebarPanelComponent do
         {render_graph_sub_tab(@graph_sub_tab, assigns)}
       </div>
     </div>
+    """
+  end
+
+  defp render_tab(:context, assigns) do
+    ~H"""
+    <.live_component
+      module={LoomkinWeb.ContextLibraryComponent}
+      id="context-library"
+      team_id={@active_team_id}
+    />
     """
   end
 
