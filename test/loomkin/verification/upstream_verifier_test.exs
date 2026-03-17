@@ -52,20 +52,4 @@ defmodule Loomkin.Verification.UpstreamVerifierTest do
       refute Loomkin.Tools.Git in tools
     end
   end
-
-  describe "parse_verification_result/2" do
-    # Test the parsing logic via the module's internal behavior.
-    # We invoke the private function indirectly by checking the response
-    # format the module expects.
-
-    test "module expects VERDICT: PASSED format" do
-      # The system prompt instructs the LLM to output this format.
-      # Verify that the module documentation is consistent.
-      assert Code.ensure_loaded?(UpstreamVerifier)
-      # The @moduledoc describes the expected flow
-      {:docs_v1, _, :elixir, _, %{"en" => moduledoc}, _, _} = Code.fetch_docs(UpstreamVerifier)
-      assert moduledoc =~ "passed: bool"
-      assert moduledoc =~ "confidence: 0-100"
-    end
-  end
 end

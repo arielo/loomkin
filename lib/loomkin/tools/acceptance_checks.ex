@@ -33,6 +33,8 @@ defmodule Loomkin.Tools.AcceptanceChecks do
 
   import Loomkin.Tool, only: [param!: 2, param: 3]
 
+  alias Loomkin.ShellCommand
+
   @syntax_timeout 60_000
   @test_timeout 120_000
   @lint_timeout 30_000
@@ -51,11 +53,15 @@ defmodule Loomkin.Tools.AcceptanceChecks do
   end
 
   defp run_syntax_check(project_path) do
-    case execute_command("mix compile --warnings-as-errors 2>&1", project_path, @syntax_timeout) do
+    case ShellCommand.execute(
+           "mix compile --warnings-as-errors 2>&1",
+           project_path,
+           @syntax_timeout
+         ) do
       {:ok, output, 0} ->
         {:ok,
          %{
-           result: "PASSED: Compilation successful.\n#{truncate(output)}",
+           result: "PASSED: Compilation successful.\n#{ShellCommand.truncate(output)}",
            check_type: :syntax,
            passed: true
          }}
@@ -63,7 +69,7 @@ defmodule Loomkin.Tools.AcceptanceChecks do
       {:ok, output, _code} ->
         {:ok,
          %{
-           result: "FAILED: Compilation errors detected.\n#{truncate(output)}",
+           result: "FAILED: Compilation errors detected.\n#{ShellCommand.truncate(output)}",
            check_type: :syntax,
            passed: false
          }}
@@ -103,11 +109,11 @@ defmodule Loomkin.Tools.AcceptanceChecks do
         "mix test --max-failures 5 2>&1"
       end
 
-    case execute_command(command, project_path, @test_timeout) do
+    case ShellCommand.execute(command, project_path, @test_timeout) do
       {:ok, output, 0} ->
         {:ok,
          %{
-           result: "PASSED: All tests pass.\n#{truncate(output)}",
+           result: "PASSED: All tests pass.\n#{ShellCommand.truncate(output)}",
            check_type: :tests,
            passed: true
          }}
@@ -115,7 +121,7 @@ defmodule Loomkin.Tools.AcceptanceChecks do
       {:ok, output, _code} ->
         {:ok,
          %{
-           result: "FAILED: Test failures detected.\n#{truncate(output)}",
+           result: "FAILED: Test failures detected.\n#{ShellCommand.truncate(output)}",
            check_type: :tests,
            passed: false
          }}
@@ -131,7 +137,7 @@ defmodule Loomkin.Tools.AcceptanceChecks do
   end
 
   defp run_lint_check(project_path) do
-    case execute_command("mix format --check-formatted 2>&1", project_path, @lint_timeout) do
+    case ShellCommand.execute("mix format --check-formatted 2>&1", project_path, @lint_timeout) do
       {:ok, _output, 0} ->
         {:ok,
          %{
@@ -143,7 +149,7 @@ defmodule Loomkin.Tools.AcceptanceChecks do
       {:ok, output, _code} ->
         {:ok,
          %{
-           result: "FAILED: Formatting issues detected.\n#{truncate(output)}",
+           result: "FAILED: Formatting issues detected.\n#{ShellCommand.truncate(output)}",
            check_type: :lint,
            passed: false
          }}
@@ -179,50 +185,6 @@ defmodule Loomkin.Tools.AcceptanceChecks do
          check_type: :spec,
          passed: true
        }}
-    end
-  end
-
-  defp execute_command(command, project_path, timeout) do
-    port =
-      Port.open({:spawn_executable, "/bin/sh"}, [
-        {:args, ["-c", command]},
-        :binary,
-        :exit_status,
-        :stderr_to_stdout,
-        {:cd, project_path}
-      ])
-
-    deadline = System.monotonic_time(:millisecond) + timeout
-    collect_output(port, [], deadline)
-  end
-
-  defp collect_output(port, acc, deadline) do
-    remaining = deadline - System.monotonic_time(:millisecond)
-
-    if remaining <= 0 do
-      Port.close(port)
-      {:error, "Command timed out"}
-    else
-      receive do
-        {^port, {:data, data}} ->
-          collect_output(port, [data | acc], deadline)
-
-        {^port, {:exit_status, code}} ->
-          output = acc |> Enum.reverse() |> IO.iodata_to_binary()
-          {:ok, output, code}
-      after
-        remaining ->
-          Port.close(port)
-          {:error, "Command timed out"}
-      end
-    end
-  end
-
-  defp truncate(output) do
-    if byte_size(output) > 5000 do
-      String.slice(output, 0, 5000) <> "\n... (truncated)"
-    else
-      output
     end
   end
 

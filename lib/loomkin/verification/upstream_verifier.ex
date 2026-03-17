@@ -62,29 +62,34 @@ defmodule Loomkin.Verification.UpstreamVerifier do
       "[Verification] starting upstream verifier team=#{team_id} task=#{task.id} title=#{task.title}"
     )
 
-    {:ok, pid} =
-      Task.Supervisor.start_child(Loomkin.Healing.TaskSupervisor, fn ->
-        run(opts)
-      end)
+    case Task.Supervisor.start_child(Loomkin.Healing.TaskSupervisor, fn ->
+           run(opts)
+         end) do
+      {:ok, pid} ->
+        # Set up timeout watchdog
+        timeout = Keyword.get(opts, :timeout_ms, @default_timeout_ms)
 
-    # Set up timeout
-    timeout = Keyword.get(opts, :timeout_ms, @default_timeout_ms)
+        Task.Supervisor.start_child(Loomkin.Healing.TaskSupervisor, fn ->
+          ref = Process.monitor(pid)
 
-    Task.Supervisor.start_child(Loomkin.Healing.TaskSupervisor, fn ->
-      ref = Process.monitor(pid)
-
-      receive do
-        {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
-      after
-        timeout ->
-          if Process.alive?(pid) do
-            Logger.warning("[Verification] timed out task=#{task.id}")
-            Process.exit(pid, :kill)
+          receive do
+            {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+          after
+            timeout ->
+              Logger.warning("[Verification] timed out task=#{task.id}")
+              Process.exit(pid, :kill)
           end
-      end
-    end)
+        end)
 
-    {:ok, pid}
+        {:ok, pid}
+
+      {:error, reason} ->
+        Logger.error(
+          "[Verification] failed to start verifier task=#{task.id} reason=#{inspect(reason)}"
+        )
+
+        {:error, reason}
+    end
   end
 
   @doc "Returns the tool modules used by the verifier."
@@ -101,7 +106,7 @@ defmodule Loomkin.Verification.UpstreamVerifier do
 
     project_path = resolve_project_path(team_id)
     model = resolve_model(team_id)
-    agent_name = :"verifier_#{String.slice(task.id, 0, 8)}"
+    agent_name = "verifier_#{String.slice(task.id, 0, 8)}"
 
     system_prompt = build_system_prompt(task)
     task_prompt = build_task_prompt(task)
@@ -151,7 +156,14 @@ defmodule Loomkin.Verification.UpstreamVerifier do
 
     publish_completed(team_id, task, result)
 
-    on_complete.(result)
+    try do
+      on_complete.(result)
+    rescue
+      e ->
+        Logger.error(
+          "[Verification] on_complete callback crashed task=#{task.id} error=#{Exception.message(e)}"
+        )
+    end
   rescue
     e ->
       task_id =
@@ -164,12 +176,16 @@ defmodule Loomkin.Verification.UpstreamVerifier do
 
       callback = Keyword.get(opts, :on_complete, fn _ -> :ok end)
 
-      callback.(%{
-        passed: false,
-        confidence: 0,
-        details: %{error: Exception.message(e)},
-        task_id: task_id
-      })
+      try do
+        callback.(%{
+          passed: false,
+          confidence: 0,
+          details: %{error: Exception.message(e)},
+          task_id: task_id
+        })
+      rescue
+        _ -> :ok
+      end
   end
 
   defp build_system_prompt(task) do
@@ -214,7 +230,7 @@ defmodule Loomkin.Verification.UpstreamVerifier do
 
   defp parse_verification_result(response, task) do
     text = to_string(response)
-    passed = String.contains?(text, "VERDICT: PASSED")
+    passed = Regex.match?(~r/VERDICT:\s*PASSED/i, text)
 
     confidence =
       case Regex.run(~r/CONFIDENCE:\s*(\d+)/, text) do
@@ -294,6 +310,8 @@ defmodule Loomkin.Verification.UpstreamVerifier do
        Map.merge(payload, %{type: type, agent_name: agent_name, team_id: team_id})}
     )
   rescue
-    _ -> :ok
+    e ->
+      Logger.debug("[Verification] publish_signal failed: #{Exception.message(e)}")
+      :ok
   end
 end

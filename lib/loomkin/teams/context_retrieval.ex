@@ -1,6 +1,10 @@
 defmodule Loomkin.Teams.ContextRetrieval do
   @moduledoc "How agents find and retrieve context from keepers."
 
+  require Logger
+
+  import Ecto.Query
+
   alias Loomkin.Teams.ContextKeeper
 
   @doc """
@@ -162,27 +166,30 @@ defmodule Loomkin.Teams.ContextRetrieval do
   def merge_keepers(target_pid, source_pid) do
     source_state = ContextKeeper.get_state(source_pid)
 
-    :ok =
-      ContextKeeper.store(target_pid, source_state.messages, %{
-        "merged_from" => source_state.id,
-        "merged_topic" => source_state.topic,
-        "merged_at" => DateTime.to_iso8601(DateTime.utc_now())
-      })
+    case ContextKeeper.store(target_pid, source_state.messages, %{
+           "merged_from" => source_state.id,
+           "merged_topic" => source_state.topic,
+           "merged_at" => DateTime.to_iso8601(DateTime.utc_now())
+         }) do
+      :ok ->
+        ContextKeeper.record_access(target_pid, "merge", :raw)
 
-    ContextKeeper.record_access(target_pid, "merge", :raw)
+        # Flush merged messages to DB before archiving source
+        ContextKeeper.flush_persist(target_pid)
 
-    # Flush merged messages to DB before archiving source
-    ContextKeeper.flush_persist(target_pid)
+        alias Loomkin.Schemas.ContextKeeper, as: KeeperSchema
 
-    import Ecto.Query
-    alias Loomkin.Schemas.ContextKeeper, as: KeeperSchema
+        KeeperSchema
+        |> where([k], k.id == ^source_state.id)
+        |> Loomkin.Repo.update_all(set: [status: "archived"])
 
-    KeeperSchema
-    |> where([k], k.id == ^source_state.id)
-    |> Loomkin.Repo.update_all(set: [status: "archived"])
+        GenServer.stop(source_pid, :normal)
+        :ok
 
-    GenServer.stop(source_pid, :normal)
-    :ok
+      {:error, reason} ->
+        Logger.warning("[ContextRetrieval] merge store failed: #{inspect(reason)}")
+        {:error, reason}
+    end
   rescue
     e -> {:error, Exception.message(e)}
   end

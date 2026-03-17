@@ -1,5 +1,5 @@
 defmodule Loomkin.Tools.IntrospectDecisionHistoryTest do
-  use Loomkin.DataCase, async: false
+  use Loomkin.DataCase, async: true
 
   alias Loomkin.Decisions.Graph
   alias Loomkin.Tools.IntrospectDecisionHistory

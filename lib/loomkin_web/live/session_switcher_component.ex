@@ -1,8 +1,11 @@
 defmodule LoomkinWeb.SessionSwitcherComponent do
   use LoomkinWeb, :live_component
 
+  require Logger
+
   alias Loomkin.Session.Persistence
 
+  @impl true
   def update(assigns, socket) do
     prev_project_path = socket.assigns[:project_path]
     prev_show_all = socket.assigns[:show_all_projects] || false
@@ -32,6 +35,7 @@ defmodule LoomkinWeb.SessionSwitcherComponent do
     end
   end
 
+  @impl true
   def render(assigns) do
     assigns =
       assign(assigns, :session_index, current_session_index(assigns.session_id, assigns.sessions))
@@ -59,7 +63,10 @@ defmodule LoomkinWeb.SessionSwitcherComponent do
           <.icon name="hero-chat-bubble-left-right-mini" class="w-3 h-3 flex-shrink-0 opacity-60" />
           <span class="truncate max-w-[160px]">{current_session_label(@session_id, @sessions)}</span>
           <svg
-            class={"w-2.5 h-2.5 flex-shrink-0 transition-transform duration-150 opacity-50 " <> if(@dropdown_open, do: "rotate-180", else: "")}
+            class={[
+              "w-2.5 h-2.5 flex-shrink-0 transition-transform duration-150 opacity-50",
+              @dropdown_open && "rotate-180"
+            ]}
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -156,6 +163,7 @@ defmodule LoomkinWeb.SessionSwitcherComponent do
     """
   end
 
+  @impl true
   def handle_event("toggle_dropdown", _params, socket) do
     {:noreply, assign(socket, dropdown_open: !socket.assigns.dropdown_open)}
   end
@@ -213,7 +221,9 @@ defmodule LoomkinWeb.SessionSwitcherComponent do
     datetime = Map.get(session, :updated_at) || Map.get(session, :inserted_at)
     LoomkinWeb.TimeHelpers.relative_time(datetime)
   rescue
-    _e -> "just now"
+    e ->
+      Logger.debug("[SessionSwitcher] relative_time failed: #{Exception.message(e)}")
+      "just now"
   end
 
   defp current_session_index(session_id, sessions) when is_list(sessions) do

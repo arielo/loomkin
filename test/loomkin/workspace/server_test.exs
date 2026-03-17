@@ -23,7 +23,8 @@ defmodule Loomkin.Workspace.ServerTest do
     end
 
     test "fails for nonexistent workspace" do
-      Process.flag(:trap_exit, true)
+      old = Process.flag(:trap_exit, true)
+      on_exit(fn -> Process.flag(:trap_exit, old) end)
 
       assert {:error, :workspace_not_found} =
                Server.start_link(workspace_id: Ecto.UUID.generate())

@@ -159,7 +159,10 @@ defmodule Loomkin.Session.SessionTest do
           project_path: project_path
         )
 
-      # Synchronize via GenServer call to ensure init side-effects complete
+      # Wait for process to be ready (may need brief time for init side-effects)
+      assert Process.alive?(pid1),
+             "Session process died immediately — check init/workspace errors"
+
       _ = :sys.get_state(pid1)
 
       team_id_1 = Session.get_team_id(pid1)

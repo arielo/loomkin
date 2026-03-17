@@ -43,6 +43,9 @@ defmodule Loomkin.Workspace.Server do
 
   @doc "Find or start a workspace server, creating the DB record if needed."
   @spec find_or_start(map()) :: {:ok, pid(), String.t()} | {:error, term()}
+  def find_or_start(%{project_path: nil}), do: {:error, :no_project_path}
+  def find_or_start(%{project_path: ""}), do: {:error, :no_project_path}
+
   def find_or_start(attrs) do
     project_path = Map.fetch!(attrs, :project_path)
 
@@ -62,6 +65,17 @@ defmodule Loomkin.Workspace.Server do
              }) do
           {:ok, workspace} ->
             ensure_started(workspace)
+
+          {:error, %Ecto.Changeset{} = changeset} ->
+            if has_unique_constraint_error?(changeset) do
+              # Another process won the race — retry lookup
+              case find_by_project_path(project_path) do
+                {:ok, workspace} -> ensure_started(workspace)
+                :not_found -> {:error, :workspace_creation_conflict}
+              end
+            else
+              {:error, changeset}
+            end
 
           {:error, reason} ->
             {:error, reason}
@@ -225,7 +239,15 @@ defmodule Loomkin.Workspace.Server do
     # Persist status BEFORE dissolving team — if dissolve_team crashes,
     # the workspace is still correctly marked hibernated and won't hand
     # out a dead team_id on next find_or_start.
-    persist_field(state.id, %{status: :hibernated, team_id: nil})
+    case persist_field(state.id, %{status: :hibernated, team_id: nil}) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "[Workspace] hibernate persist failed workspace=#{state.id} error=#{inspect(reason)}, continuing"
+        )
+    end
 
     # Dissolve the team (stops all agents + cleans up ETS)
     if state.team_id do
@@ -311,18 +333,23 @@ defmodule Loomkin.Workspace.Server do
         {:ok, pid, workspace.id}
 
       [] ->
-        # Re-activate if hibernated
-        if workspace.status == :hibernated do
-          persist_field(workspace.id, %{status: :active})
-        end
-
         case DynamicSupervisor.start_child(
                Loomkin.Workspace.Supervisor,
                {__MODULE__, workspace_id: workspace.id}
              ) do
-          {:ok, pid} -> {:ok, pid, workspace.id}
-          {:error, {:already_started, pid}} -> {:ok, pid, workspace.id}
-          {:error, reason} -> {:error, reason}
+          {:ok, pid} ->
+            # Re-activate if hibernated — only after start_child succeeds
+            if workspace.status == :hibernated do
+              persist_field(workspace.id, %{status: :active})
+            end
+
+            {:ok, pid, workspace.id}
+
+          {:error, {:already_started, pid}} ->
+            {:ok, pid, workspace.id}
+
+          {:error, reason} ->
+            {:error, reason}
         end
     end
   end
@@ -351,7 +378,14 @@ defmodule Loomkin.Workspace.Server do
         "[Workspace] persist_field failed id=#{workspace_id} attrs=#{inspect(attrs)} error=#{inspect(e)}"
       )
 
-      :ok
+      {:error, e}
+  end
+
+  defp has_unique_constraint_error?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {_field, {_msg, meta}} -> meta[:constraint] == :unique
+      _ -> false
+    end)
   end
 
   defp checkpoint_tasks(state) do

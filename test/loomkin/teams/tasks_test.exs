@@ -217,6 +217,29 @@ defmodule Loomkin.Teams.TasksTest do
     end
   end
 
+  describe "auto_schedule_unblocked/1" do
+    test "broadcasts tasks_unblocked when blocker completes", %{team_id: team_id} do
+      {:ok, blocker} = Tasks.create_task(team_id, %{title: "Blocker"})
+      {:ok, blocked} = Tasks.create_task(team_id, %{title: "Blocked"})
+      Tasks.add_dependency(blocked.id, blocker.id, :blocks)
+
+      Tasks.assign_task(blocker.id, "coder")
+      Tasks.complete_task(blocker.id, "done")
+
+      # Unblocking now goes through UpstreamVerifier (async) before broadcasting.
+      # The verifier always unblocks dependents regardless of pass/fail, but it
+      # runs in a Task process so we need a longer timeout.
+      assert_receive {:signal,
+                      %Jido.Signal{
+                        type: "collaboration.peer.message",
+                        data: %{message: {:tasks_unblocked, ids, _predecessor_outputs}}
+                      }},
+                     5_000
+
+      assert blocked.id in ids
+    end
+  end
+
   # -- Smart Assignment --
 
   describe "smart_assign/2" do

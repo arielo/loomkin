@@ -70,7 +70,7 @@ defmodule Loomkin.Tools.AcceptanceChecksTest do
           %{project_path: "/tmp"}
         )
 
-      assert {:ok, %{check_type: :spec, passed: :pending, result: result_text}} = result
+      assert {:ok, %{check_type: :spec, passed: true, result: result_text}} = result
       assert result_text =~ "MANUAL"
       assert result_text =~ "Must handle nil input"
     end

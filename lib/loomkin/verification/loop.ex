@@ -20,6 +20,7 @@ defmodule Loomkin.Verification.Loop do
 
   require Logger
 
+  alias Loomkin.ShellCommand
   alias Loomkin.Workspace.Server, as: WorkspaceServer
 
   @checkpoint_interval 5
@@ -211,6 +212,12 @@ defmodule Loomkin.Verification.Loop do
     {:noreply, state}
   end
 
+  @impl true
+  def terminate(_reason, state) do
+    kill_test_task(state)
+    cancel_timeout(state)
+  end
+
   # --- Private ---
 
   defp spawn_test_task(state) do
@@ -335,12 +342,12 @@ defmodule Loomkin.Verification.Loop do
   end
 
   defp run_test_in_path(test_command, project_path) do
-    case execute_command(test_command, project_path, @test_command_timeout) do
+    case ShellCommand.execute(test_command, project_path, @test_command_timeout) do
       {:ok, output, 0} ->
-        %{passed: true, output: truncate(output), exit_code: 0}
+        %{passed: true, output: ShellCommand.truncate(output, 10_000), exit_code: 0}
 
       {:ok, output, code} ->
-        %{passed: false, output: truncate(output), exit_code: code}
+        %{passed: false, output: ShellCommand.truncate(output, 10_000), exit_code: code}
 
       {:error, reason} ->
         %{passed: false, output: "Command failed: #{reason}", exit_code: -1}
@@ -382,7 +389,9 @@ defmodule Loomkin.Verification.Loop do
        }}
     )
   rescue
-    _ -> :ok
+    e ->
+      Logger.debug("[VerificationLoop] feed_failure_memory failed: #{Exception.message(e)}")
+      :ok
   end
 
   defp checkpoint(state) do
@@ -438,7 +447,9 @@ defmodule Loomkin.Verification.Loop do
       {:verification_event, Map.put(full_payload, :type, type)}
     )
   rescue
-    _ -> :ok
+    e ->
+      Logger.debug("[VerificationLoop] publish_signal failed: #{Exception.message(e)}")
+      :ok
   end
 
   defp cancel_timeout(%{timeout_ref: ref}) when is_reference(ref) do
@@ -450,10 +461,7 @@ defmodule Loomkin.Verification.Loop do
   defp kill_test_task(%{test_task: ref, test_task_pid: pid})
        when is_reference(ref) and is_pid(pid) do
     Process.demonitor(ref, [:flush])
-
-    if Process.alive?(pid) do
-      Process.exit(pid, :kill)
-    end
+    Process.exit(pid, :kill)
   end
 
   defp kill_test_task(%{test_task: ref}) when is_reference(ref) do
@@ -464,49 +472,5 @@ defmodule Loomkin.Verification.Loop do
 
   defp via(id) do
     {:via, Registry, {Loomkin.Verification.Registry, id}}
-  end
-
-  defp execute_command(command, project_path, timeout) do
-    port =
-      Port.open({:spawn_executable, "/bin/sh"}, [
-        {:args, ["-c", command]},
-        :binary,
-        :exit_status,
-        :stderr_to_stdout,
-        {:cd, project_path}
-      ])
-
-    deadline = System.monotonic_time(:millisecond) + timeout
-    collect_output(port, [], deadline)
-  end
-
-  defp collect_output(port, acc, deadline) do
-    remaining = deadline - System.monotonic_time(:millisecond)
-
-    if remaining <= 0 do
-      Port.close(port)
-      {:error, "Command timed out"}
-    else
-      receive do
-        {^port, {:data, data}} ->
-          collect_output(port, [data | acc], deadline)
-
-        {^port, {:exit_status, code}} ->
-          output = acc |> Enum.reverse() |> IO.iodata_to_binary()
-          {:ok, output, code}
-      after
-        remaining ->
-          Port.close(port)
-          {:error, "Command timed out"}
-      end
-    end
-  end
-
-  defp truncate(output) do
-    if byte_size(output) > 10_000 do
-      String.slice(output, 0, 10_000) <> "\n... (truncated)"
-    else
-      output
-    end
   end
 end

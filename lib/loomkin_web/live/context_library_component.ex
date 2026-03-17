@@ -740,9 +740,22 @@ defmodule LoomkinWeb.ContextLibraryComponent do
 
     keepers =
       if team_id do
-        ContextRetrieval.list_keepers(team_id)
-        |> Enum.map(fn k ->
-          detail = fetch_keeper_detail(team_id, k.id)
+        raw_keepers = ContextRetrieval.list_keepers(team_id)
+
+        details =
+          raw_keepers
+          |> Task.async_stream(
+            fn k -> {k.id, fetch_keeper_detail(team_id, k.id)} end,
+            timeout: :timer.seconds(5),
+            on_timeout: :kill_task
+          )
+          |> Enum.reduce(%{}, fn
+            {:ok, {id, detail}}, acc -> Map.put(acc, id, detail)
+            _, acc -> acc
+          end)
+
+        Enum.map(raw_keepers, fn k ->
+          detail = Map.get(details, k.id)
 
           %{
             id: k.id,
@@ -864,8 +877,11 @@ defmodule LoomkinWeb.ContextLibraryComponent do
   # -- Formatting helpers --
 
   defp truncate(nil, _max), do: ""
-  defp truncate(s, max) when byte_size(s) <= max, do: s
-  defp truncate(s, max), do: String.slice(s, 0, max) <> "..."
+
+  defp truncate(s, max) when is_binary(s),
+    do: if(String.length(s) <= max, do: s, else: String.slice(s, 0, max) <> "...")
+
+  defp truncate(_, _max), do: ""
 
   defp format_tokens(n) when is_integer(n) and n >= 1_000_000,
     do: "#{Float.round(n / 1_000_000, 1)}M"

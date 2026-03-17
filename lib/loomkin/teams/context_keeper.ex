@@ -11,6 +11,10 @@ defmodule Loomkin.Teams.ContextKeeper do
 
   use GenServer
 
+  require Logger
+
+  import Ecto.Query
+
   alias Loomkin.Repo
   alias Loomkin.Schemas.ContextKeeper, as: KeeperSchema
 
@@ -148,8 +152,6 @@ defmodule Loomkin.Teams.ContextKeeper do
 
   @doc "Rehydrate all keepers for a team from the database."
   def rehydrate_from_db(team_id) do
-    import Ecto.Query
-
     keepers =
       Loomkin.Schemas.ContextKeeper
       |> where([k], k.team_id == ^team_id and k.status == :active)
@@ -177,8 +179,6 @@ defmodule Loomkin.Teams.ContextKeeper do
     end)
   rescue
     e ->
-      require Logger
-
       Logger.warning(
         "[ContextKeeper] rehydrate_from_db failed team=#{team_id} error=#{inspect(e)}"
       )
@@ -238,7 +238,7 @@ defmodule Loomkin.Teams.ContextKeeper do
   @impl true
   def handle_call({:store, messages, metadata}, _from, state) do
     merged_metadata = Map.merge(state.metadata, metadata)
-    all_messages = state.messages ++ messages
+    all_messages = messages ++ state.messages
     token_count = estimate_tokens(all_messages)
     was_below = state.token_count < @summary_token_threshold
 
@@ -270,31 +270,32 @@ defmodule Loomkin.Teams.ContextKeeper do
         state
       end
 
-    state =
-      if state.dirty do
-        case do_persist(state) do
-          {:ok, _} -> %{state | dirty: false}
-          {:error, _} = err -> raise "flush_persist failed: #{inspect(err)}"
-        end
-      else
-        state
-      end
+    if state.dirty do
+      case do_persist(state) do
+        {:ok, _} ->
+          {:reply, :ok, %{state | dirty: false}}
 
-    {:reply, :ok, state}
+        {:error, _reason} = err ->
+          Logger.warning("[ContextKeeper] flush_persist failed: #{inspect(err)}")
+          {:reply, err, state}
+      end
+    else
+      {:reply, :ok, state}
+    end
   end
 
   @impl true
   def handle_call(:retrieve_all, _from, state) do
-    {:reply, {:ok, state.messages}, state}
+    {:reply, {:ok, Enum.reverse(state.messages)}, state}
   end
 
   @impl true
   def handle_call({:retrieve, query}, _from, state) do
     result =
       if state.token_count < @keyword_match_budget do
-        state.messages
+        Enum.reverse(state.messages)
       else
-        keyword_match(state.messages, query)
+        keyword_match(Enum.reverse(state.messages), query)
       end
 
     {:reply, {:ok, result}, state}
@@ -302,7 +303,7 @@ defmodule Loomkin.Teams.ContextKeeper do
 
   @impl true
   def handle_call({:smart_retrieve, question}, _from, state) do
-    context = format_messages_as_context(state.messages)
+    context = state.messages |> Enum.reverse() |> format_messages_as_context()
 
     model = Loomkin.Teams.ModelRouter.default_model()
 
@@ -379,8 +380,8 @@ defmodule Loomkin.Teams.ContextKeeper do
   def handle_info(:generate_summary, state) do
     pid = self()
 
-    Task.start(fn ->
-      summary = generate_summary_text(state.messages)
+    Task.Supervisor.start_child(Loomkin.Healing.TaskSupervisor, fn ->
+      summary = state.messages |> Enum.reverse() |> generate_summary_text()
 
       if summary do
         GenServer.cast(pid, {:set_summary, summary})
@@ -405,7 +406,8 @@ defmodule Loomkin.Teams.ContextKeeper do
               schedule_persist(state)
           end
         rescue
-          _ ->
+          e ->
+            Logger.debug("[ContextKeeper] persist failed: #{Exception.message(e)}")
             schedule_persist(state)
         end
       else
@@ -444,7 +446,8 @@ defmodule Loomkin.Teams.ContextKeeper do
             :ok
         end
       rescue
-        _ ->
+        e ->
+          Logger.debug("[ContextKeeper] terminate persist failed: #{Exception.message(e)}")
           :ok
       end
     end
@@ -551,17 +554,19 @@ defmodule Loomkin.Teams.ContextKeeper do
         nil
     end
   rescue
-    _ -> nil
+    e ->
+      Logger.debug("[ContextKeeper] generate_summary_text failed: #{Exception.message(e)}")
+      nil
   end
 
   defp do_archive(state) do
-    import Ecto.Query
-
     KeeperSchema
     |> where([k], k.id == ^state.id)
     |> Repo.update_all(set: [status: "archived"])
   rescue
-    _ -> :ok
+    e ->
+      Logger.debug("[ContextKeeper] do_archive failed: #{Exception.message(e)}")
+      :ok
   end
 
   defp do_persist(state) do
@@ -570,7 +575,7 @@ defmodule Loomkin.Teams.ContextKeeper do
       team_id: state.team_id,
       topic: state.topic,
       source_agent: state.source_agent,
-      messages: %{"messages" => state.messages},
+      messages: %{"messages" => Enum.reverse(state.messages)},
       token_count: state.token_count,
       metadata: state.metadata,
       status: :active,
@@ -607,7 +612,8 @@ defmodule Loomkin.Teams.ContextKeeper do
       end
     )
   rescue
-    _ ->
+    e ->
+      Logger.debug("[ContextKeeper] update_registry_tokens failed: #{Exception.message(e)}")
       :ok
   end
 
@@ -678,14 +684,16 @@ defmodule Loomkin.Teams.ContextKeeper do
       end
     end
   rescue
-    _ -> :ok
+    e ->
+      Logger.debug("[ContextKeeper] maybe_track_cost failed: #{Exception.message(e)}")
+      :ok
   end
 
   defp keyword_fallback(state, query) do
     if state.token_count < @keyword_match_budget do
-      state.messages
+      Enum.reverse(state.messages)
     else
-      keyword_match(state.messages, query)
+      keyword_match(Enum.reverse(state.messages), query)
     end
   end
 

@@ -84,12 +84,21 @@ defmodule Loomkin.Session.Manager do
   defp maybe_attach_to_workspace(session_id, opts) do
     project_path = Keyword.get(opts, :project_path)
 
+    if is_nil(project_path) or project_path == "" do
+      Logger.debug("[Session] no project path, creating session-scoped team")
+      create_session_scoped_team(session_id, opts)
+    else
+      attach_to_workspace(session_id, opts, project_path)
+    end
+  end
+
+  defp attach_to_workspace(session_id, opts, project_path) do
     try do
       # Find or create workspace for this project
       workspace_result =
         WorkspaceServer.find_or_start(%{
           project_path: project_path,
-          name: Path.basename(project_path || "untitled")
+          name: Path.basename(project_path)
         })
 
       case workspace_result do
@@ -216,8 +225,15 @@ defmodule Loomkin.Session.Manager do
   end
 
   defp detach_from_workspace(session_id, session_pid) do
+    db_session =
+      try do
+        Loomkin.Session.Persistence.get_session(session_id)
+      catch
+        _, _ -> nil
+      end
+
     try do
-      case Loomkin.Session.Persistence.get_session(session_id) do
+      case db_session do
         %{workspace_id: workspace_id} when is_binary(workspace_id) ->
           if WorkspaceServer.alive?(workspace_id) do
             WorkspaceServer.detach_session(workspace_id, session_id)
@@ -234,7 +250,7 @@ defmodule Loomkin.Session.Manager do
     try do
       team_id = Session.get_team_id(session_pid)
 
-      case Loomkin.Session.Persistence.get_session(session_id) do
+      case db_session do
         %{workspace_id: nil} when is_binary(team_id) ->
           Loomkin.Teams.Manager.dissolve_team(team_id)
 

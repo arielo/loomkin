@@ -32,5 +32,7 @@ defmodule Loomkin.Workspace do
     workspace
     |> cast(attrs, @required_fields ++ @optional_fields)
     |> validate_required(@required_fields)
+    |> validate_length(:name, max: 255)
+    |> unique_constraint(:name, name: :workspaces_user_id_name_index)
   end
 end

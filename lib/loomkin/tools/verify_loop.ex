@@ -38,6 +38,17 @@ defmodule Loomkin.Tools.VerifyLoop do
   @impl true
   def run(params, context) do
     test_command = param!(params, :test_command)
+
+    case Loomkin.ShellCommand.validate_command(test_command) do
+      :ok ->
+        do_start_loop(params, context, test_command)
+
+      {:error, reason} ->
+        {:error, "Invalid test command: #{reason}"}
+    end
+  end
+
+  defp do_start_loop(params, context, test_command) do
     success_criteria = param(params, :success_criteria, nil)
     max_iterations = param(params, :max_iterations, 10)
     team_id = param!(context, :team_id)
@@ -75,7 +86,7 @@ defmodule Loomkin.Tools.VerifyLoop do
          }}
 
       {:error, reason} ->
-        {:ok, %{result: "Failed to start verification loop: #{inspect(reason)}"}}
+        {:error, "Failed to start verification loop: #{inspect(reason)}"}
     end
   end
 

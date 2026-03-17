@@ -9,12 +9,13 @@ defmodule Loomkin.Tools.IntrospectFailurePatternsTest do
     {:ok, team_id} = Manager.create_team(name: "failure-patterns-test")
 
     on_exit(fn ->
-      if Process.whereis(Loomkin.Teams.AgentSupervisor) do
-        DynamicSupervisor.which_children(Loomkin.Teams.AgentSupervisor)
-        |> Enum.each(fn {_, pid, _, _} ->
-          DynamicSupervisor.terminate_child(Loomkin.Teams.AgentSupervisor, pid)
-        end)
-      end
+      # Only stop keepers started by this test — match on the team_id prefix
+      Registry.select(Loomkin.Teams.AgentRegistry, [
+        {{{team_id, :"$1"}, :"$2", :_}, [], [:"$2"]}
+      ])
+      |> Enum.each(fn pid ->
+        if Process.alive?(pid), do: GenServer.stop(pid, :normal, 1_000)
+      end)
 
       Loomkin.Teams.TableRegistry.delete_table(team_id)
     end)

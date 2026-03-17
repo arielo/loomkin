@@ -11,7 +11,7 @@ defmodule Loomkin.Repo.Migrations.CreateTaskJournalEntries do
       add :task_id, :binary_id, null: false
       add :status, :string, null: false
       add :result_summary, :text
-      add :checkpoint_json, :map, default: %{}
+      add :checkpoint_json, :map, null: false, default: %{}
 
       timestamps(type: :utc_datetime)
     end
@@ -19,5 +19,6 @@ defmodule Loomkin.Repo.Migrations.CreateTaskJournalEntries do
     create index(:task_journal_entries, [:workspace_id])
     create index(:task_journal_entries, [:task_id])
     create index(:task_journal_entries, [:workspace_id, :task_id])
+    create index(:task_journal_entries, [:inserted_at])
   end
 end

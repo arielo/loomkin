@@ -8,7 +8,7 @@ defmodule Loomkin.Repo.Migrations.CreateWorkspaces do
       add :project_paths, {:array, :string}, null: false, default: []
       add :team_id, :string
       add :status, :string, null: false, default: "active"
-      add :user_id, references(:users, on_delete: :nilify_all, type: :bigint)
+      add :user_id, references(:users, on_delete: :delete_all, type: :bigint)
 
       timestamps(type: :utc_datetime)
     end
@@ -18,5 +18,11 @@ defmodule Loomkin.Repo.Migrations.CreateWorkspaces do
     create index(:workspaces, [:inserted_at])
     create index(:workspaces, [:user_id])
     create index(:workspaces, [:project_paths], using: :gin)
+
+    create constraint(:workspaces, :valid_status,
+      check: "status IN ('active', 'hibernated', 'archived')"
+    )
+
+    create unique_index(:workspaces, [:user_id, :name])
   end
 end

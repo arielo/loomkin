@@ -1,5 +1,5 @@
 defmodule Loomkin.Verification.LoopTest do
-  use Loomkin.DataCase, async: false
+  use ExUnit.Case, async: false
 
   alias Loomkin.Verification.Loop
 
@@ -30,14 +30,14 @@ defmodule Loomkin.Verification.LoopTest do
       %{pid: pid} = start_loop(test_command: "true", max_iterations: 3)
 
       ref = Process.monitor(pid)
-      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5_000
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
     end
 
     test "loop fails after max iterations when command always fails" do
       %{pid: pid} = start_loop(test_command: "false", max_iterations: 2)
 
       ref = Process.monitor(pid)
-      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 10_000
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 3_000
     end
 
     test "status returns current state while loop running" do
@@ -69,15 +69,16 @@ defmodule Loomkin.Verification.LoopTest do
     test "steer injects guidance into state" do
       id = Ecto.UUID.generate()
 
+      # Use a slow command so iterations don't complete between steer and state read
       %{pid: _pid} =
         start_loop(
           id: id,
-          test_command: "false",
+          test_command: "sleep 30",
           max_iterations: 100,
-          timeout_ms: 30_000
+          timeout_ms: 60_000
         )
 
-      # Synchronize to ensure init completes
+      # Synchronize to ensure init completes and test task is spawned
       _ = :sys.get_state(via(id))
 
       assert :ok = Loop.steer(id, "try approach X")
@@ -132,12 +133,12 @@ defmodule Loomkin.Verification.LoopTest do
   end
 
   describe "confidence tracking" do
-    test "confidence is 100 when tests pass" do
+    test "loop exits normally when tests pass on first iteration" do
       id = Ecto.UUID.generate()
       %{pid: pid} = start_loop(id: id, test_command: "true", max_iterations: 1)
 
       ref = Process.monitor(pid)
-      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5_000
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
     end
   end
 
