@@ -36,6 +36,7 @@ defmodule Loomkin.Verification.Loop do
     :success_criteria,
     :timeout_ref,
     :test_task,
+    :test_task_pid,
     max_iterations: @default_max_iterations,
     current_iteration: 0,
     results: [],
@@ -226,11 +227,11 @@ defmodule Loomkin.Verification.Loop do
     test_command = state.test_command
 
     task =
-      Task.async(fn ->
+      Task.Supervisor.async_nolink(Loomkin.Healing.TaskSupervisor, fn ->
         run_test(test_command, team_id)
       end)
 
-    {:noreply, %{state | test_task: task.ref}}
+    {:noreply, %{state | test_task: task.ref, test_task_pid: task.pid}}
   end
 
   defp process_test_result(state, test_result) do
@@ -241,7 +242,16 @@ defmodule Loomkin.Verification.Loop do
       timestamp: DateTime.utc_now()
     }
 
-    state = %{state | results: state.results ++ [result_entry], test_task: nil}
+    # Keep only last 10 results to bound memory
+    capped_results = Enum.take(state.results, -9) ++ [result_entry]
+
+    state = %{
+      state
+      | results: capped_results,
+        test_task: nil,
+        test_task_pid: nil
+    }
+
     state = update_confidence(state)
 
     publish_signal(state, "verification.loop.iteration", %{
@@ -315,12 +325,16 @@ defmodule Loomkin.Verification.Loop do
   end
 
   defp run_test(test_command, team_id) do
-    project_path =
-      case Loomkin.Teams.Manager.get_team_project_path(team_id) do
-        path when is_binary(path) -> path
-        _ -> "."
-      end
+    case Loomkin.Teams.Manager.get_team_project_path(team_id) do
+      path when is_binary(path) ->
+        run_test_in_path(test_command, path)
 
+      _ ->
+        %{passed: false, output: "Cannot resolve project path for team #{team_id}", exit_code: -1}
+    end
+  end
+
+  defp run_test_in_path(test_command, project_path) do
     case execute_command(test_command, project_path, @test_command_timeout) do
       {:ok, output, 0} ->
         %{passed: true, output: truncate(output), exit_code: 0}
@@ -394,6 +408,11 @@ defmodule Loomkin.Verification.Loop do
           Logger.warning(
             "[VerificationLoop] checkpoint failed id=#{state.id} error=#{Exception.message(e)}"
           )
+      catch
+        :exit, reason ->
+          Logger.warning(
+            "[VerificationLoop] checkpoint exit id=#{state.id} reason=#{inspect(reason)}"
+          )
       end
     end
   end
@@ -428,6 +447,15 @@ defmodule Loomkin.Verification.Loop do
 
   defp cancel_timeout(_state), do: :ok
 
+  defp kill_test_task(%{test_task: ref, test_task_pid: pid})
+       when is_reference(ref) and is_pid(pid) do
+    Process.demonitor(ref, [:flush])
+
+    if Process.alive?(pid) do
+      Process.exit(pid, :kill)
+    end
+  end
+
   defp kill_test_task(%{test_task: ref}) when is_reference(ref) do
     Process.demonitor(ref, [:flush])
   end
@@ -448,21 +476,29 @@ defmodule Loomkin.Verification.Loop do
         {:cd, project_path}
       ])
 
-    collect_output(port, [], timeout)
+    deadline = System.monotonic_time(:millisecond) + timeout
+    collect_output(port, [], deadline)
   end
 
-  defp collect_output(port, acc, timeout) do
-    receive do
-      {^port, {:data, data}} ->
-        collect_output(port, [data | acc], timeout)
+  defp collect_output(port, acc, deadline) do
+    remaining = deadline - System.monotonic_time(:millisecond)
 
-      {^port, {:exit_status, code}} ->
-        output = acc |> Enum.reverse() |> IO.iodata_to_binary()
-        {:ok, output, code}
-    after
-      timeout ->
-        Port.close(port)
-        {:error, "Command timed out after #{timeout}ms"}
+    if remaining <= 0 do
+      Port.close(port)
+      {:error, "Command timed out"}
+    else
+      receive do
+        {^port, {:data, data}} ->
+          collect_output(port, [data | acc], deadline)
+
+        {^port, {:exit_status, code}} ->
+          output = acc |> Enum.reverse() |> IO.iodata_to_binary()
+          {:ok, output, code}
+      after
+        remaining ->
+          Port.close(port)
+          {:error, "Command timed out"}
+      end
     end
   end
 

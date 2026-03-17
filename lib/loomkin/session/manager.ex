@@ -100,32 +100,30 @@ defmodule Loomkin.Session.Manager do
           # Persist workspace_id to the session DB record
           persist_workspace_id(session_id, workspace_id)
 
-          # Check if workspace already has a running team
-          case WorkspaceServer.get_team_id(workspace_id) do
-            team_id when is_binary(team_id) ->
-              # Workspace already has a team — reuse it
+          # Atomically get-or-create team (serialized in workspace GenServer to prevent races)
+          team_result =
+            WorkspaceServer.get_or_create_team_id(workspace_id, fn ->
+              Loomkin.Teams.Manager.create_team(
+                name: "ws-#{String.slice(workspace_id, 0, 8)}",
+                project_path: project_path
+              )
+            end)
+
+          case team_result do
+            {:ok, team_id} ->
               Logger.info(
-                "[Kin:session] reusing workspace team workspace=#{workspace_id} team=#{team_id} session=#{session_id}"
+                "[Kin:session] workspace team ready workspace=#{workspace_id} team=#{team_id} session=#{session_id}"
               )
 
               persist_team_id(session_id, team_id)
               notify_session(session_id, {:team_created, team_id})
 
-            nil ->
-              # No team yet — create one under the workspace
-              {:ok, team_id} =
-                Loomkin.Teams.Manager.create_team(
-                  name: "ws-#{String.slice(workspace_id, 0, 8)}",
-                  project_path: project_path
-                )
-
-              Logger.info(
-                "[Kin:session] backing team created workspace=#{workspace_id} team=#{team_id} session=#{session_id}"
+            {:error, reason} ->
+              Logger.warning(
+                "[Kin:session] workspace team creation failed workspace=#{workspace_id} reason=#{inspect(reason)}, falling back"
               )
 
-              WorkspaceServer.set_team_id(workspace_id, team_id)
-              persist_team_id(session_id, team_id)
-              notify_session(session_id, {:team_created, team_id})
+              create_session_scoped_team(session_id, opts)
           end
 
         {:error, reason} ->
@@ -176,25 +174,20 @@ defmodule Loomkin.Session.Manager do
   end
 
   defp persist_team_id(session_id, team_id) do
-    case Loomkin.Session.Persistence.get_session(session_id) do
-      nil ->
-        :ok
-
-      db_session ->
-        case Loomkin.Session.Persistence.update_session(db_session, %{team_id: team_id}) do
-          {:ok, _} -> :ok
-          {:error, _reason} -> :ok
-        end
-    end
+    persist_session_fields(session_id, %{team_id: team_id})
   end
 
   defp persist_workspace_id(session_id, workspace_id) do
+    persist_session_fields(session_id, %{workspace_id: workspace_id})
+  end
+
+  defp persist_session_fields(session_id, attrs) do
     case Loomkin.Session.Persistence.get_session(session_id) do
       nil ->
         :ok
 
       db_session ->
-        case Loomkin.Session.Persistence.update_session(db_session, %{workspace_id: workspace_id}) do
+        case Loomkin.Session.Persistence.update_session(db_session, attrs) do
           {:ok, _} -> :ok
           {:error, _reason} -> :ok
         end

@@ -621,8 +621,6 @@ defmodule LoomkinWeb.WorkspaceLive do
               updated_messages
             )
 
-          socket = assign(socket, context_info: context_info)
-
           # Auto-title page from first user message
           socket =
             if socket.assigns.messages == [] do
@@ -638,12 +636,6 @@ defmodule LoomkinWeb.WorkspaceLive do
             else
               socket
             end
-
-          context_info =
-            Loomkin.Session.ContextWindow.context_usage_info(
-              socket.assigns.model,
-              updated_messages
-            )
 
           {:noreply,
            socket
@@ -707,22 +699,6 @@ defmodule LoomkinWeb.WorkspaceLive do
   @valid_tabs ~w(files diff graph context)
   def handle_event("switch_tab", %{"tab" => tab}, socket) when tab in @valid_tabs do
     tab_atom = String.to_existing_atom(tab)
-
-    socket =
-      if tab_atom == :team and socket.assigns.buffered_activity_events != [] do
-        # Flush buffered events to the component now that it's visible
-        events = Enum.reverse(socket.assigns.buffered_activity_events)
-
-        send_update(LoomkinWeb.TeamActivityComponent,
-          id: "team-activity",
-          reset_events: events
-        )
-
-        assign(socket, buffered_activity_events: [])
-      else
-        socket
-      end
-
     {:noreply, assign(socket, active_tab: tab_atom)}
   end
 
@@ -3808,14 +3784,6 @@ defmodule LoomkinWeb.WorkspaceLive do
     }
 
     debug_signals = Enum.take([entry | socket.assigns.debug_signals], 50)
-
-    # Auto-open debug panel on first signal
-    socket =
-      if socket.assigns.debug_signals == [] and not socket.assigns.debug_panel_open do
-        assign(socket, :debug_panel_open, true)
-      else
-        socket
-      end
 
     assign(socket, :debug_signals, debug_signals)
   end

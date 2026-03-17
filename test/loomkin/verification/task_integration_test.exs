@@ -86,14 +86,10 @@ defmodule Loomkin.Verification.TaskIntegrationTest do
 
       # With only :informs dep, auto_schedule_unblocked should be called directly
       # (no verifier spawned). The dependent should get unblocked immediately.
-      # Give a moment for the broadcast
-      Process.sleep(50)
-
-      # Should receive tasks_unblocked since :informs doesn't block
-      assert_received {:signal,
-                       %Jido.Signal{
-                         data: %{message: {:tasks_unblocked, _ids, _outputs}}
-                       }}
+      assert_receive {:signal,
+                      %Jido.Signal{
+                        data: %{message: {:tasks_unblocked, _ids, _outputs}}
+                      }}
     end
   end
 end

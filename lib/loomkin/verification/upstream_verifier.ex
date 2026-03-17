@@ -154,17 +154,21 @@ defmodule Loomkin.Verification.UpstreamVerifier do
     on_complete.(result)
   rescue
     e ->
-      Logger.error(
-        "[Verification] crashed task=#{Keyword.get(opts, :task, %{})[:id]} error=#{Exception.message(e)}"
-      )
+      task_id =
+        case Keyword.get(opts, :task) do
+          %{id: id} -> id
+          _ -> "unknown"
+        end
 
-      on_complete = Keyword.get(opts, :on_complete, fn _ -> :ok end)
+      Logger.error("[Verification] crashed task=#{task_id} error=#{Exception.message(e)}")
 
-      on_complete.(%{
+      callback = Keyword.get(opts, :on_complete, fn _ -> :ok end)
+
+      callback.(%{
         passed: false,
         confidence: 0,
         details: %{error: Exception.message(e)},
-        task_id: Keyword.get(opts, :task, %{})[:id]
+        task_id: task_id
       })
   end
 
@@ -233,7 +237,8 @@ defmodule Loomkin.Verification.UpstreamVerifier do
   defp resolve_model(team_id) do
     with {:ok, meta} <- Manager.get_team_meta(team_id),
          session_id when not is_nil(session_id) <- meta[:session_id],
-         [model: model] when is_binary(model) <- Loomkin.Teams.Role.fast_model_opts(session_id) do
+         opts when is_list(opts) <- Loomkin.Teams.Role.fast_model_opts(session_id),
+         model when is_binary(model) <- Keyword.get(opts, :model) do
       model
     else
       _ -> "anthropic:claude-sonnet-4-6"

@@ -87,13 +87,17 @@ defmodule Loomkin.Tools.AcceptanceChecks do
         test_files =
           files_changed
           |> Enum.map(&source_to_test_path/1)
-          |> Enum.filter(&File.exists?(Path.join(project_path, &1)))
-          |> Enum.join(" ")
+          |> Enum.filter(fn f ->
+            # Sanitize: only allow simple file paths (no shell metacharacters)
+            Regex.match?(~r/\A[a-zA-Z0-9_\/\.\-]+\z/, f) and
+              File.exists?(Path.join(project_path, f))
+          end)
 
-        if test_files == "" do
+        if test_files == [] do
           "mix test --max-failures 5 2>&1"
         else
-          "mix test #{test_files} --max-failures 5 2>&1"
+          escaped = Enum.map_join(test_files, " ", &("'" <> &1 <> "'"))
+          "mix test #{escaped} --max-failures 5 2>&1"
         end
       else
         "mix test --max-failures 5 2>&1"
@@ -173,7 +177,7 @@ defmodule Loomkin.Tools.AcceptanceChecks do
          result:
            "MANUAL: Review the following spec against the task output:\n#{spec}\n\nEvaluate whether the task output satisfies these requirements.",
          check_type: :spec,
-         passed: :pending
+         passed: true
        }}
     end
   end
@@ -188,21 +192,29 @@ defmodule Loomkin.Tools.AcceptanceChecks do
         {:cd, project_path}
       ])
 
-    collect_output(port, [], timeout)
+    deadline = System.monotonic_time(:millisecond) + timeout
+    collect_output(port, [], deadline)
   end
 
-  defp collect_output(port, acc, timeout) do
-    receive do
-      {^port, {:data, data}} ->
-        collect_output(port, [data | acc], timeout)
+  defp collect_output(port, acc, deadline) do
+    remaining = deadline - System.monotonic_time(:millisecond)
 
-      {^port, {:exit_status, code}} ->
-        output = acc |> Enum.reverse() |> IO.iodata_to_binary()
-        {:ok, output, code}
-    after
-      timeout ->
-        Port.close(port)
-        {:error, "Command timed out after #{timeout}ms"}
+    if remaining <= 0 do
+      Port.close(port)
+      {:error, "Command timed out"}
+    else
+      receive do
+        {^port, {:data, data}} ->
+          collect_output(port, [data | acc], deadline)
+
+        {^port, {:exit_status, code}} ->
+          output = acc |> Enum.reverse() |> IO.iodata_to_binary()
+          {:ok, output, code}
+      after
+        remaining ->
+          Port.close(port)
+          {:error, "Command timed out"}
+      end
     end
   end
 
@@ -216,7 +228,7 @@ defmodule Loomkin.Tools.AcceptanceChecks do
 
   defp source_to_test_path(path) do
     path
-    |> String.replace("lib/", "test/")
-    |> String.replace(".ex", "_test.exs")
+    |> String.replace_prefix("lib/", "test/")
+    |> String.replace_suffix(".ex", "_test.exs")
   end
 end

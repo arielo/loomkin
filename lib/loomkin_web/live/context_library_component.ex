@@ -145,12 +145,17 @@ defmodule LoomkinWeb.ContextLibraryComponent do
   end
 
   def handle_event("archive_keeper", %{"id" => id}, socket) do
-    case Registry.lookup(Loomkin.Teams.AgentRegistry, {socket.assigns.team_id, "keeper:#{id}"}) do
-      [{pid, _}] ->
-        GenServer.stop(pid, :normal)
+    # Archive: mark as archived in DB, then stop the process
+    import Ecto.Query
+    alias Loomkin.Schemas.ContextKeeper, as: KeeperSchema
 
-      [] ->
-        :ok
+    KeeperSchema
+    |> where([k], k.id == ^id)
+    |> Loomkin.Repo.update_all(set: [status: "archived"])
+
+    case Registry.lookup(Loomkin.Teams.AgentRegistry, {socket.assigns.team_id, "keeper:#{id}"}) do
+      [{pid, _}] -> GenServer.stop(pid, :normal)
+      [] -> :ok
     end
 
     {:noreply,
@@ -160,13 +165,18 @@ defmodule LoomkinWeb.ContextLibraryComponent do
   end
 
   def handle_event("delete_keeper", %{"id" => id}, socket) do
-    case Registry.lookup(Loomkin.Teams.AgentRegistry, {socket.assigns.team_id, "keeper:#{id}"}) do
-      [{pid, _}] ->
-        GenServer.stop(pid, :normal)
+    # Delete: remove from DB entirely, then stop the process
+    import Ecto.Query
+    alias Loomkin.Schemas.ContextKeeper, as: KeeperSchema
 
-      [] ->
-        :ok
+    case Registry.lookup(Loomkin.Teams.AgentRegistry, {socket.assigns.team_id, "keeper:#{id}"}) do
+      [{pid, _}] -> GenServer.stop(pid, :normal)
+      [] -> :ok
     end
+
+    KeeperSchema
+    |> where([k], k.id == ^id)
+    |> Loomkin.Repo.delete_all()
 
     {:noreply,
      socket
@@ -336,6 +346,13 @@ defmodule LoomkinWeb.ContextLibraryComponent do
 
           <%!-- Rows --%>
           <div id="keeper-rows" phx-update="stream" class="flex-1 overflow-y-auto">
+            <%!-- Empty state (visible only when stream has no children) --%>
+            <div class="hidden only:flex flex-col items-center justify-center p-6">
+              <div class="w-8 h-8 rounded-lg bg-violet-500/10 flex items-center justify-center mb-2">
+                <span class="hero-circle-stack-mini inline-block w-4 h-4 text-violet-400" />
+              </div>
+              <p class="text-[11px] text-muted text-center">No keepers match filters</p>
+            </div>
             <div
               :for={{dom_id, keeper} <- @streams.keeper_rows}
               id={dom_id}
@@ -377,7 +394,7 @@ defmodule LoomkinWeb.ContextLibraryComponent do
             </div>
           </div>
 
-          <%!-- Empty state --%>
+          <%!-- No-keepers-at-all state (no keepers loaded from source) --%>
           <div :if={@keepers == []} class="flex-1 flex flex-col items-center justify-center p-6">
             <div class="w-8 h-8 rounded-lg bg-violet-500/10 flex items-center justify-center mb-2">
               <span class="hero-circle-stack-mini inline-block w-4 h-4 text-violet-400" />

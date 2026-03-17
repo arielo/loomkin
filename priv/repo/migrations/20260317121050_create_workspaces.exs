@@ -17,5 +17,6 @@ defmodule Loomkin.Repo.Migrations.CreateWorkspaces do
     create index(:workspaces, [:status])
     create index(:workspaces, [:inserted_at])
     create index(:workspaces, [:user_id])
+    create index(:workspaces, [:project_paths], using: :gin)
   end
 end

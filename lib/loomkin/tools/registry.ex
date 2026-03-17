@@ -36,7 +36,9 @@ defmodule Loomkin.Tools.Registry do
     Loomkin.Tools.PeerConfirmTentative,
     Loomkin.Tools.PeerDiscardTentative,
     Loomkin.Tools.PeerNegotiateTask,
-    Loomkin.Tools.SpawnConversation
+    Loomkin.Tools.SpawnConversation,
+    Loomkin.Tools.IntrospectDecisionHistory,
+    Loomkin.Tools.IntrospectFailurePatterns
   ]
 
   @lead_tools [
@@ -50,7 +52,9 @@ defmodule Loomkin.Tools.Registry do
 
   @healing_tools [
     Loomkin.Tools.DiagnosisReport,
-    Loomkin.Tools.FixConfirmation
+    Loomkin.Tools.FixConfirmation,
+    Loomkin.Tools.VerifyLoop,
+    Loomkin.Tools.AcceptanceChecks
   ]
 
   @team_tools @peer_tools ++ @lead_tools
@@ -139,6 +143,7 @@ defmodule Loomkin.Tools.Registry do
     verification_output
     personas max_rounds facilitator template
     check_type spec_description
+    test_command success_criteria max_iterations
   )a
 
   @known_param_key_map Map.new(@known_param_keys, fn atom -> {Atom.to_string(atom), atom} end)

@@ -32,6 +32,5 @@ defmodule Loomkin.Workspace do
     workspace
     |> cast(attrs, @required_fields ++ @optional_fields)
     |> validate_required(@required_fields)
-    |> validate_inclusion(:status, [:active, :hibernated, :archived])
   end
 end

@@ -17,6 +17,8 @@ defmodule Loomkin.Workspace.Server do
 
   require Logger
 
+  import Ecto.Query
+
   alias Loomkin.Repo
   alias Loomkin.Workspace
   alias Loomkin.Workspace.TaskJournalEntry
@@ -89,6 +91,18 @@ defmodule Loomkin.Workspace.Server do
   @spec set_team_id(String.t(), String.t()) :: :ok
   def set_team_id(workspace_id, team_id) do
     GenServer.call(via(workspace_id), {:set_team_id, team_id})
+  end
+
+  @doc """
+  Atomically get-or-create a team for this workspace.
+
+  If the workspace already has a team_id, returns it. Otherwise calls `create_fn`
+  to create a new team (serialized through the GenServer to prevent races).
+  """
+  @spec get_or_create_team_id(String.t(), (-> {:ok, String.t()} | {:error, term()})) ::
+          {:ok, String.t()} | {:error, term()}
+  def get_or_create_team_id(workspace_id, create_fn) do
+    GenServer.call(via(workspace_id), {:get_or_create_team_id, create_fn}, 30_000)
   end
 
   @doc """
@@ -183,19 +197,47 @@ defmodule Loomkin.Workspace.Server do
   end
 
   @impl true
+  def handle_call({:get_or_create_team_id, create_fn}, _from, state) do
+    case state.team_id do
+      team_id when is_binary(team_id) ->
+        {:reply, {:ok, team_id}, state}
+
+      nil ->
+        case create_fn.() do
+          {:ok, team_id} ->
+            state = %{state | team_id: team_id}
+            persist_field(state.id, %{team_id: team_id})
+            {:reply, {:ok, team_id}, state}
+
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
+    end
+  end
+
+  @impl true
   def handle_call(:hibernate, _from, state) do
     Logger.info("[Workspace] hibernating workspace=#{state.id} team=#{state.team_id}")
 
     # Checkpoint current task states
     checkpoint_tasks(state)
 
+    # Persist status BEFORE dissolving team — if dissolve_team crashes,
+    # the workspace is still correctly marked hibernated and won't hand
+    # out a dead team_id on next find_or_start.
+    persist_field(state.id, %{status: :hibernated, team_id: nil})
+
     # Dissolve the team (stops all agents + cleans up ETS)
     if state.team_id do
-      Loomkin.Teams.Manager.dissolve_team(state.team_id)
+      try do
+        Loomkin.Teams.Manager.dissolve_team(state.team_id)
+      rescue
+        e ->
+          Logger.warning(
+            "[Workspace] dissolve_team failed workspace=#{state.id} team=#{state.team_id} error=#{inspect(e)}"
+          )
+      end
     end
-
-    # Update DB status
-    persist_field(state.id, %{status: :hibernated})
 
     {:stop, :normal, :ok, %{state | status: :hibernated, team_id: nil}}
   end
@@ -230,6 +272,15 @@ defmodule Loomkin.Workspace.Server do
     {:noreply, state}
   end
 
+  @impl true
+  def terminate(reason, state) do
+    Logger.info(
+      "[Workspace] stopping workspace=#{state.id} team=#{state.team_id} reason=#{inspect(reason)}"
+    )
+
+    :ok
+  end
+
   # --- Private ---
 
   defp via(workspace_id) do
@@ -237,8 +288,6 @@ defmodule Loomkin.Workspace.Server do
   end
 
   defp find_by_project_path(project_path) do
-    import Ecto.Query
-
     case Workspace
          |> where([w], ^project_path in w.project_paths)
          |> where([w], w.status in [:active, :hibernated])
@@ -279,33 +328,71 @@ defmodule Loomkin.Workspace.Server do
   end
 
   defp persist_field(workspace_id, attrs) do
-    case Repo.get(Workspace, workspace_id) do
-      nil -> :ok
-      workspace -> workspace |> Workspace.changeset(attrs) |> Repo.update()
+    # Convert Ecto.Enum values to strings for update_all (bypasses schema casting)
+    db_attrs =
+      Enum.map(attrs, fn
+        {:status, val} when is_atom(val) -> {:status, to_string(val)}
+        pair -> pair
+      end)
+
+    {count, _} =
+      Workspace
+      |> where([w], w.id == ^workspace_id)
+      |> Repo.update_all(set: db_attrs)
+
+    if count == 0 do
+      Logger.warning("[Workspace] persist_field: workspace not found id=#{workspace_id}")
     end
+
+    :ok
+  rescue
+    e ->
+      Logger.error(
+        "[Workspace] persist_field failed id=#{workspace_id} attrs=#{inspect(attrs)} error=#{inspect(e)}"
+      )
+
+      :ok
   end
 
   defp checkpoint_tasks(state) do
     if state.team_id do
       try do
         tasks = Loomkin.Teams.Tasks.list_all(state.team_id)
+        checkpointable = Enum.filter(tasks, &(&1.status in [:in_progress, :assigned, :pending]))
 
-        for task <- tasks, task.status in [:in_progress, :assigned, :pending] do
-          %TaskJournalEntry{}
-          |> TaskJournalEntry.changeset(%{
-            workspace_id: state.id,
-            task_id: task.id,
-            status: to_string(task.status),
-            result_summary: task.result,
-            checkpoint_json: %{
-              title: task.title,
-              owner: task.owner,
-              priority: task.priority,
-              description: task.description
-            }
-          })
-          |> Repo.insert()
-        end
+        Repo.transaction(fn ->
+          Enum.each(checkpointable, fn task ->
+            result_summary =
+              if is_binary(task.result), do: String.slice(task.result, 0, 10_000), else: nil
+
+            changeset =
+              %TaskJournalEntry{}
+              |> TaskJournalEntry.changeset(%{
+                workspace_id: state.id,
+                task_id: task.id,
+                status: to_string(task.status),
+                result_summary: result_summary,
+                checkpoint_json: %{
+                  title: task.title,
+                  owner: task.owner,
+                  priority: task.priority,
+                  description: task.description
+                }
+              })
+
+            case Repo.insert(changeset) do
+              {:ok, _} ->
+                :ok
+
+              {:error, changeset} ->
+                Logger.warning(
+                  "[Workspace] checkpoint entry failed workspace=#{state.id} task=#{task.id} errors=#{inspect(changeset.errors)}"
+                )
+
+                Repo.rollback(:checkpoint_entry_failed)
+            end
+          end)
+        end)
       rescue
         e ->
           Logger.warning(

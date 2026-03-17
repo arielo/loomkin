@@ -3,8 +3,6 @@ defmodule Loomkin.Teams.ContextRetrieval do
 
   alias Loomkin.Teams.ContextKeeper
 
-  @default_max_tokens 8000
-
   @doc """
   List all keepers for a team.
 
@@ -81,7 +79,6 @@ defmodule Loomkin.Teams.ContextRetrieval do
   """
   def retrieve(team_id, query, opts \\ []) do
     keeper_id = Keyword.get(opts, :keeper_id)
-    _max_tokens = Keyword.get(opts, :max_tokens, @default_max_tokens)
     mode = Keyword.get(opts, :mode, detect_mode(query))
     agent_name = Keyword.get(opts, :agent_name)
 
@@ -173,6 +170,9 @@ defmodule Loomkin.Teams.ContextRetrieval do
       })
 
     ContextKeeper.record_access(target_pid, "merge", :raw)
+
+    # Flush merged messages to DB before archiving source
+    ContextKeeper.flush_persist(target_pid)
 
     import Ecto.Query
     alias Loomkin.Schemas.ContextKeeper, as: KeeperSchema

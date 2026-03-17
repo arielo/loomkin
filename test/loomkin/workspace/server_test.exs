@@ -119,11 +119,9 @@ defmodule Loomkin.Workspace.ServerTest do
       ref = Process.monitor(pid)
       assert :ok = Server.hibernate(workspace.id)
 
-      # Wait for process to fully terminate
+      # Wait for process to fully terminate — Registry deregisters synchronously
+      # when the via-registered process exits
       assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
-
-      # Allow Registry to clean up the entry (async via process link)
-      Process.sleep(50)
 
       # Server should be stopped
       refute Server.alive?(workspace.id)

@@ -49,7 +49,7 @@ defmodule Loomkin.Teams.ContextKeeper do
 
   def child_spec(opts) do
     %{
-      id: __MODULE__,
+      id: {__MODULE__, opts[:id]},
       start: {__MODULE__, :start_link, [opts]},
       restart: :transient
     }
@@ -170,13 +170,19 @@ defmodule Loomkin.Teams.ContextKeeper do
           ]
 
           DynamicSupervisor.start_child(
-            Loomkin.Teams.KeeperSupervisor,
+            Loomkin.Teams.AgentSupervisor,
             {__MODULE__, opts}
           )
       end
     end)
   rescue
-    _ ->
+    e ->
+      require Logger
+
+      Logger.warning(
+        "[ContextKeeper] rehydrate_from_db failed team=#{team_id} error=#{inspect(e)}"
+      )
+
       :ok
   end
 
@@ -416,7 +422,8 @@ defmodule Loomkin.Teams.ContextKeeper do
 
     if score >= @archive_staleness_threshold and age_days >= @archive_min_age_days do
       do_archive(state)
-      {:stop, :normal, state}
+      # Set dirty: false so terminate/2 doesn't overwrite archived status with :active
+      {:stop, :normal, %{state | dirty: false}}
     else
       schedule_staleness_sweep()
       {:noreply, state}
