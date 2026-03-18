@@ -5,7 +5,9 @@ defmodule Loomkin.Tools.PeerCompleteTask do
     name: "peer_complete_task",
     description:
       "Mark a task as completed with a result summary and optional structured details. " <>
-        "Broadcasts task_completed so the team knows the task is done.",
+        "Broadcasts task_completed so the team knows the task is done. " <>
+        "You MUST provide a meaningful result AND at least one of: actions_taken, " <>
+        "discoveries, or files_changed. Empty completions will be rejected.",
     schema: [
       team_id: [type: :string, required: true, doc: "Team ID"],
       task_id: [type: :string, required: true, doc: "ID of the task to complete"],
@@ -35,7 +37,45 @@ defmodule Loomkin.Tools.PeerCompleteTask do
       open_questions: param(params, :open_questions) || []
     }
 
-    # Verify the task belongs to this team before completing it
+    # Validate that the agent actually produced something
+    case validate_completion_quality(completion_attrs) do
+      :ok ->
+        do_complete(team_id, task_id, completion_attrs)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp validate_completion_quality(attrs) do
+    result = attrs.result
+    actions = attrs.actions_taken
+    discoveries = attrs.discoveries
+    files = attrs.files_changed
+
+    has_result = is_binary(result) and String.length(String.trim(result)) > 20
+    has_actions = is_list(actions) and actions != []
+    has_discoveries = is_list(discoveries) and discoveries != []
+    has_files = is_list(files) and files != []
+
+    cond do
+      not has_result ->
+        {:error,
+         "Task completion rejected: you must provide a meaningful result summary (>20 chars). " <>
+           "Describe what you actually accomplished, with specific details."}
+
+      not (has_actions or has_discoveries or has_files) ->
+        {:error,
+         "Task completion rejected: you must provide at least one of actions_taken, " <>
+           "discoveries, or files_changed. If you haven't produced any artifacts, " <>
+           "you haven't completed the task — keep working."}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp do_complete(team_id, task_id, completion_attrs) do
     case Tasks.get_task(task_id) do
       {:error, :not_found} ->
         {:error, "Task not found: #{task_id}"}
@@ -46,11 +86,17 @@ defmodule Loomkin.Tools.PeerCompleteTask do
       {:ok, _task} ->
         case Tasks.complete_task(task_id, completion_attrs) do
           {:ok, task} ->
+            artifact_count =
+              length(completion_attrs.actions_taken) +
+                length(completion_attrs.discoveries) +
+                length(completion_attrs.files_changed)
+
             summary = """
             Task completed:
               ID: #{task.id}
               Title: #{task.title}
               Status: #{task.status}
+              Artifacts: #{artifact_count} (#{length(completion_attrs.actions_taken)} actions, #{length(completion_attrs.discoveries)} discoveries, #{length(completion_attrs.files_changed)} files)
             """
 
             {:ok, %{result: String.trim(summary), task_id: task.id}}
