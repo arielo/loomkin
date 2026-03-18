@@ -79,12 +79,14 @@ defmodule Loomkin.Tools.TeamComms do
   end
 
   defp parse_time(nil), do: :unknown
+
   defp parse_time(time_str) when is_binary(time_str) do
     case DateTime.from_iso8601(time_str) do
       {:ok, dt, _offset} -> {:ok, dt}
       _ -> :unknown
     end
   end
+
   defp parse_time(_), do: :unknown
 
   defp format_event(%{signal: %Jido.Signal{} = sig}) do

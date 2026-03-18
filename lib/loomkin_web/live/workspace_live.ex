@@ -6158,6 +6158,7 @@ defmodule LoomkinWeb.WorkspaceLive do
   defp signal_to_comms_event(%{signal: %Jido.Signal{} = sig}) do
     # Parse the signal's time field (ISO 8601) for accurate timestamps
     timestamp = parse_signal_time(sig.time)
+
     case sig.type do
       "collaboration.peer.message" ->
         agent = sig.data[:from] || "unknown"

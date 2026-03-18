@@ -91,7 +91,8 @@ defmodule Loomkin.Utils.TaskSummary do
       decision_count: decision_count,
       open_question_count: question_count,
       result_length: result_length,
-      quality_score: compute_quality_score(result_length, action_count, discovery_count, file_count)
+      quality_score:
+        compute_quality_score(result_length, action_count, discovery_count, file_count)
     }
   end
 

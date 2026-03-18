@@ -373,7 +373,9 @@ defmodule LoomkinWeb.AgentCardComponent do
                   <% @card.status == :complete -> %>
                     <div class="flex items-center gap-3 py-2">
                       <div class="h-px flex-1 bg-surface-3" />
-                      <span class="text-xs font-medium" style={"color: #{@agent_color}60;"}>done</span>
+                      <span class="text-xs font-medium" style={"color: #{@agent_color}60;"}>
+                        done
+                      </span>
                       <div class="h-px flex-1 bg-surface-3" />
                     </div>
                   <% true -> %>

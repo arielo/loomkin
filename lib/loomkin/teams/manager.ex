@@ -494,7 +494,9 @@ defmodule Loomkin.Teams.Manager do
         :error
 
       workspace ->
-        Logger.info("[Manager] Recovering ETS table for team=#{team_id} from workspace=#{workspace.id}")
+        Logger.info(
+          "[Manager] Recovering ETS table for team=#{team_id} from workspace=#{workspace.id}"
+        )
 
         project_path =
           case workspace.project_paths do

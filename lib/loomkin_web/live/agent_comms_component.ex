@@ -417,7 +417,16 @@ defmodule LoomkinWeb.AgentCommsComponent do
               {short_team_label(@event.metadata[:team_id])}
             </span>
             <span
-              :if={@event.type not in [:peer_message, :message, :question, :answer, :discovery, :conversation_turn]}
+              :if={
+                @event.type not in [
+                  :peer_message,
+                  :message,
+                  :question,
+                  :answer,
+                  :discovery,
+                  :conversation_turn
+                ]
+              }
               class="text-xs text-zinc-400 leading-5 truncate"
             >
               {@event.content}
@@ -432,7 +441,16 @@ defmodule LoomkinWeb.AgentCommsComponent do
             </span>
             <%!-- Timestamp (inline for non-message types) --%>
             <span
-              :if={@event.type not in [:peer_message, :message, :question, :answer, :discovery, :conversation_turn]}
+              :if={
+                @event.type not in [
+                  :peer_message,
+                  :message,
+                  :question,
+                  :answer,
+                  :discovery,
+                  :conversation_turn
+                ]
+              }
               class="ml-auto flex-shrink-0 text-[10px] tabular-nums text-zinc-500 leading-5"
             >
               {format_timestamp(@event.timestamp)}
@@ -440,7 +458,16 @@ defmodule LoomkinWeb.AgentCommsComponent do
           </div>
           <%!-- Message content shown directly for communication event types --%>
           <div
-            :if={@event.type in [:peer_message, :message, :question, :answer, :discovery, :conversation_turn]}
+            :if={
+              @event.type in [
+                :peer_message,
+                :message,
+                :question,
+                :answer,
+                :discovery,
+                :conversation_turn
+              ]
+            }
             class="mt-0.5"
           >
             <p class="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap break-words line-clamp-3">
