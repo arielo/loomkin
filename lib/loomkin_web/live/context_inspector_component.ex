@@ -2,13 +2,13 @@ defmodule LoomkinWeb.ContextInspectorComponent do
   @moduledoc """
   Right-panel agent deep-focus sidebar for Mission Control mode.
 
-  Always agent-scoped — shows the focused agent's activity, decisions, and tools.
+  Always agent-scoped — shows the focused agent's activity and tools.
   When no agent is focused, shows a prompt to select one.
   """
 
   use LoomkinWeb, :live_component
 
-  @tabs [:activity, :decisions, :tools]
+  @tabs [:activity, :tools]
 
   @impl true
   def mount(socket) do
@@ -31,7 +31,7 @@ defmodule LoomkinWeb.ContextInspectorComponent do
     {:ok, socket}
   end
 
-  @valid_tabs ~w(activity decisions tools)
+  @valid_tabs ~w(activity tools)
 
   @impl true
   def handle_event("switch_tab", %{"tab" => tab}, socket)
@@ -328,20 +328,6 @@ defmodule LoomkinWeb.ContextInspectorComponent do
     """
   end
 
-  defp render_tab(:decisions, assigns) do
-    ~H"""
-    <div class="h-full">
-      <.live_component
-        module={LoomkinWeb.DecisionGraphComponent}
-        id="inspector-agent-graph"
-        session_id={@session_id}
-        team_id={@team_id}
-        focused_agent={@focused_agent}
-      />
-    </div>
-    """
-  end
-
   defp render_tab(:tools, assigns) do
     ~H"""
     <div class="p-3 space-y-2">
@@ -420,14 +406,10 @@ defmodule LoomkinWeb.ContextInspectorComponent do
   defp tab_icon(:activity),
     do: raw("<span class=\"hero-bolt-mini inline-block w-4 h-4\"></span>")
 
-  defp tab_icon(:decisions),
-    do: raw("<span class=\"hero-share-mini inline-block w-4 h-4\"></span>")
-
   defp tab_icon(:tools),
     do: raw("<span class=\"hero-wrench-mini inline-block w-4 h-4\"></span>")
 
   defp tab_label(:activity), do: "Activity"
-  defp tab_label(:decisions), do: "Decisions"
   defp tab_label(:tools), do: "Tools"
 
   # ── Data helpers ────────────────────────────────────────────────────

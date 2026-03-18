@@ -2996,19 +2996,16 @@ defmodule LoomkinWeb.WorkspaceLive do
     end
   end
 
-  # Team decision and context events — refresh graph + buffer for activity feed + comms
+  # Team decision and context events — forward to activity feed + comms
   def handle_info({:decision_logged, _node_id, _agent_name} = event, socket) do
-    refresh_decision_graphs(socket)
     {:noreply, socket |> forward_to_activity(event) |> forward_to_cards_and_comms(event)}
   end
 
   def handle_info({:node_added, _node} = event, socket) do
-    refresh_decision_graphs(socket)
     {:noreply, socket |> forward_to_activity(event) |> forward_to_cards_and_comms(event)}
   end
 
   def handle_info({:pivot_created, _result} = event, socket) do
-    refresh_decision_graphs(socket)
     {:noreply, socket |> forward_to_activity(event) |> forward_to_cards_and_comms(event)}
   end
 
@@ -4485,7 +4482,6 @@ defmodule LoomkinWeb.WorkspaceLive do
       socket = assign(socket, subscribed_teams: MapSet.put(subscribed, team_id))
 
       # Replay recent decision signals to catch up on events missed before subscription.
-      # The bus delivers replayed signals as regular messages, triggering refresh_decision_graphs.
       five_min_ago = System.os_time(:microsecond) - 5 * 60 * 1_000_000
       Loomkin.Signals.replay("decision.**", five_min_ago)
 
@@ -4543,40 +4539,6 @@ defmodule LoomkinWeb.WorkspaceLive do
     assign(socket, auth_version: auth_version)
   end
 
-  # Recompute cached roster data.
-  # Called on roster refresh — avoids per-render Registry queries.
-  # NOTE: Do NOT subscribe to PubSub topics here — this is called from many
-  # event handlers and PubSub.subscribe is not idempotent (each call adds
-  # another subscription, causing duplicate event delivery).
-  defp refresh_decision_graphs(socket) do
-    # "inspector-agent-graph" is always mounted in the context inspector (mission control).
-    # "decision-graph" lives in the sidebar graph tab (solo mode).
-    # "team-decision-graph" lives in the team sub-tab (solo mode, :team tab, :graph sub-tab).
-    ref = System.unique_integer()
-
-    if socket.assigns[:mode] == :mission_control do
-      send_update(LoomkinWeb.DecisionGraphComponent,
-        id: "inspector-agent-graph",
-        session_id: socket.assigns[:session_id],
-        team_id: socket.assigns[:active_team_id],
-        refresh_ref: ref
-      )
-    end
-
-    send_update(LoomkinWeb.DecisionGraphComponent,
-      id: "decision-graph",
-      session_id: socket.assigns[:session_id],
-      team_id: socket.assigns[:active_team_id],
-      refresh_ref: ref
-    )
-
-    send_update(LoomkinWeb.DecisionGraphComponent,
-      id: "team-decision-graph",
-      session_id: socket.assigns[:session_id],
-      team_id: socket.assigns[:display_team_id],
-      refresh_ref: ref
-    )
-  end
 
   defp refresh_task_graph(socket) do
     ref = System.unique_integer()
