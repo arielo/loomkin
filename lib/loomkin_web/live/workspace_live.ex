@@ -2665,6 +2665,16 @@ defmodule LoomkinWeb.WorkspaceLive do
     # Clear stuck :error status — if the agent is streaming it has recovered and is working
     status_update = if card && card.status == :error, do: %{status: :working}, else: %{}
 
+    # Save any in-progress thinking content to history before clearing.
+    # Only for :thinking — :last_thinking was already saved by stream_end,
+    # and :message content is preserved separately.
+    socket =
+      if card && card.content_type == :thinking && card.latest_content not in [nil, ""] do
+        push_to_thought_history(socket, agent_name, card.latest_content, :thinking)
+      else
+        socket
+      end
+
     socket =
       update_agent_card(
         socket,
@@ -4070,6 +4080,7 @@ defmodule LoomkinWeb.WorkspaceLive do
                 comms_event_count={@comms_event_count}
                 comms_stream={@streams.comms_events}
                 focused_agent={@focused_agent}
+                inspector_mode={@inspector_mode}
                 kin_agents={@kin_agents}
                 cached_agents={@cached_agents}
                 active_team_id={@active_team_id}
@@ -4916,11 +4927,16 @@ defmodule LoomkinWeb.WorkspaceLive do
   # --- Task lifecycle: human-readable content ---
 
   defp activity_event_from({:task_created, _task_id, title}) do
+    content =
+      if is_binary(title) and byte_size(title) > 0,
+        do: "New task: #{String.slice(title, 0, 200)}",
+        else: "New task created"
+
     %{
       id: Ecto.UUID.generate(),
       type: :task_created,
       agent: "system",
-      content: "New task created",
+      content: content,
       timestamp: DateTime.utc_now(),
       expanded: false,
       metadata: %{title: title}
