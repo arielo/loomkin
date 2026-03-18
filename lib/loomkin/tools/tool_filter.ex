@@ -275,17 +275,63 @@ defmodule Loomkin.Tools.ToolFilter do
   end
 
   @doc """
-  Returns a human-readable description of denied tools for a role.
+  Returns a human-readable description of denied tools for a role,
+  with teamwork-first guidance on how to get the work done.
 
-  Useful for error messages when an agent tries to use a tool
-  outside their role's scope.
+  Instead of just listing categories, the message guides the agent
+  toward asking a teammate for help or requesting a role change.
   """
   @spec denial_reason(atom(), module()) :: String.t()
   def denial_reason(role, tool_module) do
     tool_cat = category(tool_module) || :unknown
-    allowed = categories_for_role(role)
 
-    "Tool category :#{tool_cat} is not allowed for role :#{role}. " <>
-      "Allowed categories: #{inspect(allowed)}"
+    base = "Your role (#{role}) does not include #{tool_cat} tools."
+
+    suggestion = teamwork_suggestion(role, tool_cat)
+
+    base <> " " <> suggestion
+  end
+
+  # Teamwork-first suggestions: guide agents toward collaboration, not workarounds.
+  defp teamwork_suggestion(role, tool_cat) do
+    case {role, tool_cat} do
+      {:researcher, :write} ->
+        "Use peer_message to ask a coder teammate to make this change, " <>
+          "or use peer_ask_question to request help. Include the exact file, " <>
+          "line numbers, and what needs to change."
+
+      {:researcher, :exec} ->
+        "Use peer_message to ask a coder or tester to run this command for you. " <>
+          "Describe what you need executed and what output you're looking for."
+
+      {:reviewer, :write} ->
+        "Send your suggested fix to the coder via peer_message with the exact " <>
+          "file path, line numbers, and proposed change. They can implement it."
+
+      {:tester, :write} ->
+        "Send the fix details to a coder via peer_message. Include the failing " <>
+          "test output and what code change would fix it."
+
+      {:weaver, :write} ->
+        "Route this write request to the appropriate coder via peer_message. " <>
+          "Include file path, context, and what needs to change."
+
+      {:weaver, :exec} ->
+        "Route this command to a coder or tester via peer_message. " <>
+          "Describe what needs to be executed and why."
+
+      {:weaver, :read} ->
+        "Ask a researcher or coder to read this for you via peer_ask_question. " <>
+          "They can share the relevant content back."
+
+      {_, :lead} ->
+        "Team management tools are reserved for lead/concierge roles. " <>
+          "Use peer_message to ask your lead to handle team operations, " <>
+          "or use peer_change_role if you need to take on a leadership role."
+
+      _ ->
+        "Use peer_ask_question to find a teammate with #{tool_cat} capability, " <>
+          "or use peer_change_role to request the tools you need."
+    end
   end
 end

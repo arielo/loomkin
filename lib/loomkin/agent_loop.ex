@@ -404,7 +404,8 @@ defmodule Loomkin.AgentLoop do
           )
 
           result_text =
-            "Error: Tool '#{tool_name}' is not available for your role (#{config.role}). #{reason}"
+            "Error: Tool '#{tool_name}' is not available for your role (#{config.role}). #{reason} " <>
+              "Don't try to work around this — ask a teammate for help instead."
 
           messages = record_tool_result(messages, config, tool_name, tool_call_id, result_text)
           {:ok, messages}
