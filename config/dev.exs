@@ -10,6 +10,7 @@ config :loomkin, Loomkin.Repo, port: String.to_integer(System.get_env("DB_PORT")
 # disables code reloader, file watchers, and live reload to prevent
 # restart loops and module-unavailability crashes during edits.
 # Restart the server manually to pick up changes.
+# Toggling the env var auto-cleans the build (see mix.exs guard).
 self_edit? = System.get_env("LOOMKIN_SELF_EDIT") == "1"
 
 # Development endpoint configuration
