@@ -1717,3 +1717,16 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ══════════════════════════════════════════
+   Comms Feed Filtering
+   ══════════════════════════════════════════ */
+[data-comms-filter="important"] > [phx-update="stream"] > [data-comms-category]:not([data-comms-category="important"]) {
+  display: none;
+}
+[data-comms-filter="tasks"] > [phx-update="stream"] > [data-comms-category]:not([data-comms-category="tasks"]) {
+  display: none;
+}
+[data-comms-filter="errors"] > [phx-update="stream"] > [data-comms-category]:not([data-comms-category="errors"]) {
+  display: none;
+}

@@ -2,9 +2,12 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
   @moduledoc """
   Left-panel LiveComponent for Mission Control mode.
 
-  Renders the agent card grid (concierge at top, worker grid below), ghost cards for
-  dormant kin, and the comms feed. Focused-agent view replaces the grid when
-  `focused_agent` is set.
+  Renders the agent card grid with smart layout:
+  - Concierge pinned at top (always visible, even on comms tab)
+  - Active agents displayed as full cards with prominent visual treatment
+  - Idle agents collapsed into compact single-line items (expandable)
+  - Comms feed with noise-reduction filtering
+  - Ghost cards for dormant kin
 
   All interactive events are forwarded to the parent WorkspaceLive via
   `send(self(), {:mission_control_event, event, params})`.
@@ -27,6 +30,14 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
 
   use LoomkinWeb, :live_component
 
+  # Statuses that indicate an agent is actively doing something
+  @active_statuses [:working, :thinking, :approval_pending, :ask_user_pending,
+                    :waiting_permission, :suspended_healing, :recovering,
+                    :awaiting_synthesis]
+
+  # Content types that indicate active visual activity
+  @active_content_types [:thinking, :tool_call, :streaming, :message]
+
   @impl true
   def update(assigns, socket) do
     socket =
@@ -34,6 +45,8 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
       |> assign(assigns)
       |> assign_new(:active_tab, fn -> :kin end)
       |> assign_new(:inspector_mode, fn -> :auto_follow end)
+      |> assign_new(:idle_collapsed, fn -> true end)
+      |> assign_new(:comms_filter, fn -> :all end)
 
     {:ok, socket}
   end
@@ -41,6 +54,14 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
   @impl true
   def handle_event("switch_tab", %{"tab" => tab}, socket) do
     {:noreply, assign(socket, active_tab: String.to_existing_atom(tab))}
+  end
+
+  def handle_event("toggle_idle_agents", _params, socket) do
+    {:noreply, assign(socket, idle_collapsed: !socket.assigns.idle_collapsed)}
+  end
+
+  def handle_event("set_comms_filter", %{"filter" => filter}, socket) do
+    {:noreply, assign(socket, comms_filter: String.to_existing_atom(filter))}
   end
 
   def handle_event(event, params, socket) do
@@ -59,7 +80,14 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
         Map.get(assigns.agent_cards, assigns.focused_agent)
       end
 
-    assigns = assign(assigns, :focused_card, focused_card)
+    # Split workers into active and idle groups
+    {active_workers, idle_workers} = split_workers(assigns.agent_cards, assigns.worker_card_names)
+
+    assigns =
+      assigns
+      |> assign(:focused_card, focused_card)
+      |> assign(:active_workers, active_workers)
+      |> assign(:idle_workers, idle_workers)
 
     ~H"""
     <div class="flex-1 flex flex-col min-w-0 min-h-0 bg-surface-0">
@@ -121,8 +149,21 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
           </div>
         </div>
 
+        <%!-- Concierge — ALWAYS visible, pinned above tabs --%>
+        <div :if={@concierge_card_names != []} class="flex-shrink-0 px-4 pt-3 pb-1">
+          <.live_component
+            :for={name <- @concierge_card_names}
+            module={LoomkinWeb.AgentCardComponent}
+            id={"agent-card-#{name}"}
+            card={@agent_cards[name]}
+            focused={false}
+            team_id={@active_team_id}
+            model={@agent_cards[name][:model]}
+          />
+        </div>
+
         <%!-- Tab switcher: Kin / Comms --%>
-        <div class="flex items-center gap-0.5 px-4 pt-2.5 pb-1.5 flex-shrink-0">
+        <div class="flex items-center gap-0.5 px-4 pt-2 pb-1.5 flex-shrink-0">
           <button
             phx-click="switch_tab"
             phx-value-tab="kin"
@@ -139,8 +180,13 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
             <.icon name="hero-user-group-mini" class="w-3.5 h-3.5" />
             <span>Kin</span>
             <span class="text-[10px] tabular-nums px-1.5 py-0.5 rounded-full bg-surface-2/60 text-muted">
-              {length(@concierge_card_names) + length(@worker_card_names)}
+              {length(@worker_card_names)}
             </span>
+            <%!-- Active indicator dot --%>
+            <span
+              :if={@active_workers != []}
+              class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"
+            />
           </button>
           <button
             phx-click="switch_tab"
@@ -169,19 +215,6 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
         </div>
 
         <%= if @active_tab == :kin do %>
-          <%!-- Concierge — dedicated top card --%>
-          <div :if={@concierge_card_names != []} class="flex-shrink-0 p-4 pb-1">
-            <.live_component
-              :for={name <- @concierge_card_names}
-              module={LoomkinWeb.AgentCardComponent}
-              id={"agent-card-#{name}"}
-              card={@agent_cards[name]}
-              focused={false}
-              team_id={@active_team_id}
-              model={@agent_cards[name][:model]}
-            />
-          </div>
-
           <%!-- System agents (weaver etc.) — compact status, no interactive buttons --%>
           <div :if={system_card_names(assigns) != []} class="px-3 pb-2">
             <div
@@ -274,7 +307,125 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
             <%!-- Ghost cards for dormant kin (not yet spawned) --%>
             {render_ghost_cards(assigns)}
 
-            <%= if @worker_card_names != [] do %>
+            <%!-- Active agents — full cards with prominent display --%>
+            <%= if @active_workers != [] do %>
+              <div class="mb-2">
+                <div class="flex items-center gap-2 mb-2">
+                  <span class="text-[10px] font-semibold uppercase tracking-wider text-emerald-400/80">
+                    Active
+                  </span>
+                  <span class="text-[10px] tabular-nums text-emerald-400/50">
+                    {length(@active_workers)}
+                  </span>
+                  <div class="flex-1 h-px bg-emerald-500/10" />
+                </div>
+                <div class={[
+                  "agent-card-grid grid gap-3",
+                  card_grid_cols(length(@active_workers)),
+                  "grid-alive"
+                ]}>
+                  <.live_component
+                    :for={name <- @active_workers}
+                    module={LoomkinWeb.AgentCardComponent}
+                    id={"agent-card-#{name}"}
+                    card={@agent_cards[name]}
+                    focused={false}
+                    team_id={@active_team_id}
+                    model={@agent_cards[name][:model]}
+                  />
+                </div>
+              </div>
+            <% end %>
+
+            <%!-- Idle agents — collapsible compact list --%>
+            <%= if @idle_workers != [] do %>
+              <div class="idle-agents-section mt-2">
+                <button
+                  phx-click="toggle_idle_agents"
+                  phx-target={@myself}
+                  class="group flex items-center gap-2 w-full mb-1.5 cursor-pointer"
+                >
+                  <svg
+                    class={[
+                      "w-3 h-3 text-muted/60 transition-transform duration-200",
+                      !@idle_collapsed && "rotate-90"
+                    ]}
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path
+                      fill-rule="evenodd"
+                      d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                  <span class="text-[10px] font-semibold uppercase tracking-wider text-muted/60 group-hover:text-muted transition-colors">
+                    Idle
+                  </span>
+                  <span class="text-[10px] tabular-nums text-muted/40">
+                    {length(@idle_workers)}
+                  </span>
+                  <div class="flex-1 h-px bg-surface-3/50" />
+                </button>
+
+                <%= if !@idle_collapsed do %>
+                  <div class="idle-agents-list space-y-1 animate-fade-in">
+                    <button
+                      :for={name <- @idle_workers}
+                      phx-click="focus_card_agent"
+                      phx-value-agent={name}
+                      class="group w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-150 hover:bg-surface-2/80 cursor-pointer"
+                    >
+                      <%!-- Status dot --%>
+                      <span class={[
+                        "w-2 h-2 rounded-full flex-shrink-0",
+                        idle_dot_class(@agent_cards[name])
+                      ]} />
+                      <%!-- Name --%>
+                      <span
+                        class="text-xs font-medium truncate text-secondary group-hover:text-primary transition-colors"
+                        style={"color: #{LoomkinWeb.AgentColors.agent_color(name)}80;"}
+                      >
+                        {name}
+                      </span>
+                      <%!-- Role badge --%>
+                      <span
+                        :if={@agent_cards[name] && !role_matches_name?(@agent_cards[name].role, name)}
+                        class="text-[9px] font-mono text-muted/40 truncate"
+                      >
+                        {format_agent_role(@agent_cards[name].role)}
+                      </span>
+                      <%!-- Task snippet --%>
+                      <span
+                        :if={@agent_cards[name] && @agent_cards[name].current_task}
+                        class="text-[9px] text-muted/30 truncate max-w-[120px] ml-auto"
+                      >
+                        {@agent_cards[name].current_task}
+                      </span>
+                      <%!-- Reply button on hover --%>
+                      <span class="ml-auto opacity-0 group-hover:opacity-60 transition-opacity flex-shrink-0">
+                        <.icon name="hero-chat-bubble-left-mini" class="w-3 h-3 text-muted" />
+                      </span>
+                    </button>
+                  </div>
+                <% else %>
+                  <%!-- Collapsed summary: just show dots for each idle agent --%>
+                  <div class="flex items-center gap-1.5 px-3 py-1">
+                    <span
+                      :for={name <- @idle_workers}
+                      class="w-2 h-2 rounded-full cursor-pointer transition-all duration-150 hover:scale-150"
+                      style={"background: #{LoomkinWeb.AgentColors.agent_color(name)}40;"}
+                      phx-click="focus_card_agent"
+                      phx-value-agent={name}
+                      title={name}
+                    />
+                  </div>
+                <% end %>
+              </div>
+            <% end %>
+
+            <%!-- All workers in a grid when none are active (backwards compat) --%>
+            <%= if @active_workers == [] && @idle_workers == [] && @worker_card_names != [] do %>
               <div class={[
                 "agent-card-grid grid gap-3",
                 card_grid_cols(length(@worker_card_names)),
@@ -295,12 +446,38 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
         <% else %>
           <%!-- Comms Feed (full height when active tab) --%>
           <%= if @comms_stream do %>
+            <%!-- Comms filter strip --%>
+            <div class="flex items-center gap-1 px-4 py-1.5 flex-shrink-0">
+              <button
+                :for={
+                  {label, value} <- [
+                    {"All", :all},
+                    {"Important", :important},
+                    {"Tasks", :tasks},
+                    {"Errors", :errors}
+                  ]
+                }
+                phx-click="set_comms_filter"
+                phx-value-filter={value}
+                phx-target={@myself}
+                class={[
+                  "px-2 py-0.5 rounded text-[10px] font-medium transition-colors",
+                  if(@comms_filter == value,
+                    do: "bg-brand-subtle text-brand",
+                    else: "text-muted/50 hover:text-muted hover:bg-surface-2/50"
+                  )
+                ]}
+              >
+                {label}
+              </button>
+            </div>
             <div class="flex-1 overflow-auto min-h-[200px]">
               <LoomkinWeb.AgentCommsComponent.comms_feed
                 stream={@comms_stream}
                 event_count={@comms_event_count}
                 id="agent-comms"
                 root_team_id={@active_team_id}
+                comms_filter={@comms_filter}
               />
             </div>
           <% end %>
@@ -308,6 +485,14 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
       <% end %>
     </div>
     """
+  end
+
+  # Split worker names into active and idle based on their card state
+  defp split_workers(agent_cards, worker_card_names) do
+    Enum.split_with(worker_card_names, fn name ->
+      card = agent_cards[name]
+      card && (card.status in @active_statuses || card.content_type in @active_content_types)
+    end)
   end
 
   defp render_ghost_cards(assigns) do
@@ -400,6 +585,8 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
   defp health_text_class(score) when score >= 40, do: "text-amber-400"
   defp health_text_class(_score), do: "text-red-400"
 
+  defp card_grid_cols(count) when count == 1, do: "grid-cols-1"
+  defp card_grid_cols(count) when count == 2, do: "grid-cols-2"
   defp card_grid_cols(_), do: "grid-cols-2 lg:grid-cols-3"
 
   defp any_agents_active?(agent_cards, card_names) do
@@ -408,6 +595,24 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
       card && card.content_type in [:thinking, :tool_call, :streaming]
     end)
   end
+
+  defp idle_dot_class(nil), do: "bg-zinc-600"
+
+  defp idle_dot_class(card) do
+    case card.status do
+      :paused -> "bg-blue-400/60"
+      :error -> "bg-red-400/60"
+      :complete -> "bg-emerald-400/60"
+      _ -> "bg-zinc-500/60"
+    end
+  end
+
+  defp role_matches_name?(role, name) when is_atom(role) do
+    to_string(role) == name
+  end
+
+  defp role_matches_name?(role, name) when is_binary(role), do: role == name
+  defp role_matches_name?(_, _), do: true
 
   defp kin_potency_color(potency) when is_integer(potency) do
     cond do
