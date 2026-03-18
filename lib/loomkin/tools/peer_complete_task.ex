@@ -1,5 +1,7 @@
 defmodule Loomkin.Tools.PeerCompleteTask do
-  @moduledoc "Agent-initiated task completion."
+  @moduledoc "Agent-initiated task completion with artifact verification."
+
+  require Logger
 
   use Jido.Action,
     name: "peer_complete_task",
@@ -24,9 +26,10 @@ defmodule Loomkin.Tools.PeerCompleteTask do
   alias Loomkin.Teams.Tasks
 
   @impl true
-  def run(params, _context) do
+  def run(params, context) do
     team_id = param!(params, :team_id)
     task_id = param!(params, :task_id)
+    project_path = param(context, :project_path)
 
     completion_attrs = %{
       result: param(params, :result) || "",
@@ -40,7 +43,9 @@ defmodule Loomkin.Tools.PeerCompleteTask do
     # Validate that the agent actually produced something
     case validate_completion_quality(completion_attrs) do
       :ok ->
-        do_complete(team_id, task_id, completion_attrs)
+        # Verify claimed files actually exist on disk
+        file_warnings = verify_files_changed(completion_attrs.files_changed, project_path)
+        do_complete(team_id, task_id, completion_attrs, file_warnings)
 
       {:error, reason} ->
         {:error, reason}
@@ -75,7 +80,29 @@ defmodule Loomkin.Tools.PeerCompleteTask do
     end
   end
 
-  defp do_complete(team_id, task_id, completion_attrs) do
+  @doc false
+  def verify_files_changed([], _project_path), do: []
+  def verify_files_changed(_files, nil), do: []
+
+  def verify_files_changed(files, project_path) when is_list(files) do
+    files
+    |> Enum.reject(&(&1 == "" or is_nil(&1)))
+    |> Enum.flat_map(fn file_path ->
+      full_path = Path.expand(file_path, project_path)
+
+      if File.exists?(full_path) do
+        []
+      else
+        Logger.warning(
+          "[PeerCompleteTask] Claimed file does not exist: #{file_path} (resolved: #{full_path})"
+        )
+
+        ["#{file_path} (not found on disk)"]
+      end
+    end)
+  end
+
+  defp do_complete(team_id, task_id, completion_attrs, file_warnings) do
     case Tasks.get_task(task_id) do
       {:error, :not_found} ->
         {:error, "Task not found: #{task_id}"}
@@ -91,12 +118,22 @@ defmodule Loomkin.Tools.PeerCompleteTask do
                 length(completion_attrs.discoveries) +
                 length(completion_attrs.files_changed)
 
+            warning_section =
+              if file_warnings != [] do
+                "\n  ⚠ File verification warnings: #{Enum.join(file_warnings, ", ")}"
+              else
+                ""
+              end
+
+            verified_count = length(completion_attrs.files_changed) - length(file_warnings)
+
             summary = """
             Task completed:
               ID: #{task.id}
               Title: #{task.title}
               Status: #{task.status}
               Artifacts: #{artifact_count} (#{length(completion_attrs.actions_taken)} actions, #{length(completion_attrs.discoveries)} discoveries, #{length(completion_attrs.files_changed)} files)
+              Files verified: #{verified_count}/#{length(completion_attrs.files_changed)}#{warning_section}
             """
 
             {:ok, %{result: String.trim(summary), task_id: task.id}}
