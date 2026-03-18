@@ -60,6 +60,62 @@ defmodule LoomkinWeb.TeamTreeComponentTest do
       # parent (test process) should receive {:switch_team, team_id}
       assert_received {:switch_team, "child-team-1"}
     end
+
+    test "kill_team first click sets confirm_kill, second click sends message" do
+      socket = build_component_socket(open: true)
+
+      # First click: enters confirmation state
+      {:noreply, confirming} =
+        TeamTreeComponent.handle_event("kill_team", %{"team-id" => "child-team-1"}, socket)
+
+      assert confirming.assigns.confirm_kill == "child-team-1"
+      refute_received {:kill_team, _}
+
+      # Second click: sends kill message and closes
+      {:noreply, killed} =
+        TeamTreeComponent.handle_event("kill_team", %{"team-id" => "child-team-1"}, confirming)
+
+      assert killed.assigns.open == false
+      assert killed.assigns.confirm_kill == nil
+      assert_received {:kill_team, "child-team-1"}
+    end
+
+    test "cancel_kill resets confirm_kill state" do
+      socket = build_component_socket(open: true)
+
+      {:noreply, confirming} =
+        TeamTreeComponent.handle_event("kill_team", %{"team-id" => "child-team-1"}, socket)
+
+      assert confirming.assigns.confirm_kill == "child-team-1"
+
+      {:noreply, cancelled} =
+        TeamTreeComponent.handle_event("cancel_kill", %{}, confirming)
+
+      assert cancelled.assigns.confirm_kill == nil
+    end
+
+    test "kill_all_teams sets confirm_kill to :all" do
+      socket = build_component_socket(open: true)
+
+      {:noreply, confirming} =
+        TeamTreeComponent.handle_event("kill_all_teams", %{}, socket)
+
+      assert confirming.assigns.confirm_kill == :all
+    end
+
+    test "confirm_kill_all sends :kill_all_teams and closes" do
+      socket = build_component_socket(open: true)
+
+      {:noreply, confirming} =
+        TeamTreeComponent.handle_event("kill_all_teams", %{}, socket)
+
+      {:noreply, killed} =
+        TeamTreeComponent.handle_event("confirm_kill_all", %{}, confirming)
+
+      assert killed.assigns.open == false
+      assert killed.assigns.confirm_kill == nil
+      assert_received :kill_all_teams
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -74,6 +130,7 @@ defmodule LoomkinWeb.TeamTreeComponentTest do
         __changed__: %{},
         id: "team-tree-test",
         open: open,
+        confirm_kill: nil,
         team_tree: %{"root-team" => ["child-team-1"]},
         root_team_id: "root-team",
         active_team_id: "root-team",

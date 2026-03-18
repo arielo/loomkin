@@ -232,6 +232,17 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
           </button>
           <div class="flex-1" />
           {render_collab_health(assigns)}
+          <%!-- Kill switch — dissolve active team --%>
+          <button
+            :if={@active_team_id && @worker_card_names != []}
+            type="button"
+            phx-click="dissolve_team"
+            phx-target={@myself}
+            class="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-red-400/50 hover:text-red-300 hover:bg-red-500/10 transition-colors ml-1"
+            title="Stop all agents and dissolve team"
+          >
+            <.icon name="hero-stop-mini" class="w-3 h-3" />
+          </button>
         </div>
 
         <%= if @active_tab == :kin do %>

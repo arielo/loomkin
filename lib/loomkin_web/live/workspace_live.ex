@@ -86,6 +86,8 @@ defmodule LoomkinWeb.WorkspaceLive do
         broadcast_mode: params["team_id"] != nil,
         # Leader approval gate pending (set when lead agent hits approval gate, nil otherwise)
         leader_approval_pending: nil,
+        # Kill switch confirmation state (nil or %{team_id, agent_count, scope})
+        kill_switch_confirm: nil,
         debug_signals: [],
         debug_panel_open: false,
         # Social presence: online followed users
@@ -676,6 +678,27 @@ defmodule LoomkinWeb.WorkspaceLive do
      assign(socket, status: :idle, streaming: false, streaming_content: "", streaming_agent: nil)}
   end
 
+  def handle_event("confirm_dissolve_team", _params, socket) do
+    case socket.assigns[:kill_switch_confirm] do
+      %{team_id: team_id, scope: :active} ->
+        Task.Supervisor.start_child(Loomkin.Teams.TaskSupervisor, fn ->
+          Teams.Manager.dissolve_team(team_id)
+        end)
+
+        {:noreply,
+         socket
+         |> assign(kill_switch_confirm: nil)
+         |> put_flash(:info, "Dissolving team…")}
+
+      _ ->
+        {:noreply, assign(socket, kill_switch_confirm: nil)}
+    end
+  end
+
+  def handle_event("cancel_dissolve_team", _params, socket) do
+    {:noreply, assign(socket, kill_switch_confirm: nil)}
+  end
+
   def handle_event("reply_to_agent", %{"agent" => agent_name}, socket) do
     # Find the agent's team_id from the cached roster data
     agents = socket.assigns.cached_agents
@@ -1220,6 +1243,42 @@ defmodule LoomkinWeb.WorkspaceLive do
 
     {:noreply,
      assign(socket, active_team_id: team_id, channel_bindings: bindings, reply_target: nil)}
+  end
+
+  # Kill switch: from TeamTreeComponent — kill a specific sub-team
+  def handle_info({:kill_team, team_id}, socket) do
+    root_team_id = socket.assigns[:team_id]
+
+    if team_id && team_id != root_team_id do
+      # Dissolve the team asynchronously to avoid blocking the LiveView
+      Task.Supervisor.start_child(Loomkin.Teams.TaskSupervisor, fn ->
+        Teams.Manager.dissolve_team(team_id)
+      end)
+
+      {:noreply, put_flash(socket, :info, "Dissolving team…")}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # Kill switch: stop all sub-teams from TeamTreeComponent
+  def handle_info(:kill_all_teams, socket) do
+    root_team_id = socket.assigns[:team_id]
+
+    if root_team_id do
+      sub_teams = Teams.Manager.list_sub_teams(root_team_id)
+
+      Task.Supervisor.start_child(Loomkin.Teams.TaskSupervisor, fn ->
+        Enum.each(sub_teams, &Teams.Manager.dissolve_team/1)
+      end)
+
+      # Also cancel all loops on the root team agents
+      Teams.Manager.cancel_all_loops(root_team_id)
+
+      {:noreply, put_flash(socket, :info, "Stopping all teams…")}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_info({:reply_to_agent, agent_name}, socket) do
@@ -3399,6 +3458,22 @@ defmodule LoomkinWeb.WorkspaceLive do
     handle_event("spawn_dormant_kin", %{"id" => id}, socket)
   end
 
+  # Kill switch: dissolve team from mission control panel button
+  def handle_info({:mission_control_event, "dissolve_team", _params}, socket) do
+    team_id = socket.assigns[:active_team_id]
+
+    if team_id do
+      agent_count = length(socket.assigns.cached_agents)
+
+      {:noreply,
+       assign(socket,
+         kill_switch_confirm: %{team_id: team_id, agent_count: agent_count, scope: :active}
+       )}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_info({:mission_control_event, _event, _params}, socket) do
     {:noreply, socket}
   end
@@ -3581,6 +3656,51 @@ defmodule LoomkinWeb.WorkspaceLive do
         id="command-palette"
         agents={@cached_agents}
       />
+
+      <%!-- Kill switch confirmation modal --%>
+      <div
+        :if={@kill_switch_confirm}
+        class="fixed inset-0 z-50 flex items-center justify-center"
+        id="kill-switch-backdrop"
+      >
+        <div
+          class="absolute inset-0 bg-black/60 backdrop-blur-sm"
+          phx-click="cancel_dissolve_team"
+          aria-hidden="true"
+        />
+        <div class="relative z-10 glass rounded-2xl p-6 w-full max-w-sm space-y-4 animate-fade-in border border-red-500/20">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center flex-shrink-0">
+              <.icon name="hero-exclamation-triangle" class="w-5 h-5 text-red-400" />
+            </div>
+            <div>
+              <h2 class="text-base font-semibold text-white">Stop team?</h2>
+              <p class="text-xs text-red-300/80">This action cannot be undone</p>
+            </div>
+          </div>
+          <p class="text-sm text-gray-300 leading-relaxed">
+            This will stop all
+            <span class="font-semibold text-white">{@kill_switch_confirm.agent_count}</span>
+            agent(s), cancel pending tasks, and dissolve the team.
+          </p>
+          <div class="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              phx-click="cancel_dissolve_team"
+              class="px-4 py-2 text-sm text-gray-400 hover:text-gray-300 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              phx-click="confirm_dissolve_team"
+              class="px-4 py-2 rounded-lg text-sm font-medium bg-red-500/80 text-white hover:bg-red-500 transition-colors"
+            >
+              Stop team
+            </button>
+          </div>
+        </div>
+      </div>
 
       <%!-- Save Chat modal overlay --%>
       <div
