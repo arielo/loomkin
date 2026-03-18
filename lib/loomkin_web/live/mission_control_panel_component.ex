@@ -54,6 +54,8 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
       |> assign_new(:inspector_mode, fn -> :auto_follow end)
       |> assign_new(:idle_collapsed, fn -> true end)
       |> assign_new(:comms_filter, fn -> :all end)
+      |> assign_new(:focus_modal_agent, fn -> nil end)
+      |> assign_new(:focus_modal_tab, fn -> :activity end)
 
     {:ok, socket}
   end
@@ -69,6 +71,19 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
 
   def handle_event("set_comms_filter", %{"filter" => filter}, socket) do
     {:noreply, assign(socket, comms_filter: String.to_existing_atom(filter))}
+  end
+
+  def handle_event("open_focus_modal", %{"agent" => agent_name}, socket) do
+    {:noreply, assign(socket, focus_modal_agent: agent_name, focus_modal_tab: :activity)}
+  end
+
+  def handle_event("close_focus_modal", _params, socket) do
+    {:noreply, assign(socket, focus_modal_agent: nil)}
+  end
+
+  @valid_focus_tabs ~w(activity history tools stats)
+  def handle_event("switch_focus_tab", %{"tab" => tab}, socket) when tab in @valid_focus_tabs do
+    {:noreply, assign(socket, focus_modal_tab: String.to_existing_atom(tab))}
   end
 
   def handle_event(event, params, socket) do
@@ -90,14 +105,23 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
     # Split workers into active and idle groups
     {active_workers, idle_workers} = split_workers(assigns.agent_cards, assigns.worker_card_names)
 
+    # Focus modal card data
+    focus_modal_card =
+      if assigns.focus_modal_agent do
+        Map.get(assigns.agent_cards, assigns.focus_modal_agent)
+      end
+
     assigns =
       assigns
       |> assign(:focused_card, focused_card)
       |> assign(:active_workers, active_workers)
       |> assign(:idle_workers, idle_workers)
+      |> assign(:focus_modal_card, focus_modal_card)
 
     ~H"""
     <div class="flex-1 flex flex-col min-w-0 min-h-0 bg-surface-0">
+      <%!-- Focus Modal Overlay — tabbed deep-focus view --%>
+      {render_focus_modal(assigns)}
       <%= if @focused_card do %>
         <%!-- Focused single-agent view --%>
         <div class="flex-1 flex flex-col min-h-0 p-3 overflow-hidden">
@@ -156,18 +180,7 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
           </div>
         </div>
 
-        <%!-- Concierge — ALWAYS visible, pinned above tabs --%>
-        <div :if={@concierge_card_names != []} class="flex-shrink-0 px-4 pt-3 pb-1">
-          <.live_component
-            :for={name <- @concierge_card_names}
-            module={LoomkinWeb.AgentCardComponent}
-            id={"agent-card-#{name}"}
-            card={@agent_cards[name]}
-            focused={false}
-            team_id={@active_team_id}
-            model={@agent_cards[name][:model]}
-          />
-        </div>
+        <%!-- Concierge card moved to workspace_live.ex — pinned above composer for proximity --%>
 
         <%!-- Tab switcher: Kin / Comms --%>
         <div class="flex items-center gap-0.5 px-4 pt-2 pb-1.5 flex-shrink-0">
@@ -335,15 +348,27 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
                   card_grid_cols(length(@active_workers)),
                   "grid-alive"
                 ]}>
-                  <.live_component
-                    :for={name <- @active_workers}
-                    module={LoomkinWeb.AgentCardComponent}
-                    id={"agent-card-#{name}"}
-                    card={@agent_cards[name]}
-                    focused={false}
-                    team_id={@active_team_id}
-                    model={@agent_cards[name][:model]}
-                  />
+                  <div :for={name <- @active_workers} class="relative group/card">
+                    <.live_component
+                      module={LoomkinWeb.AgentCardComponent}
+                      id={"agent-card-#{name}"}
+                      card={@agent_cards[name]}
+                      focused={false}
+                      team_id={@active_team_id}
+                      model={@agent_cards[name][:model]}
+                    />
+                    <%!-- Expand button overlay — opens tabbed focus modal --%>
+                    <button
+                      phx-click="open_focus_modal"
+                      phx-value-agent={name}
+                      phx-target={@myself}
+                      class="absolute top-2 right-2 z-10 p-1 rounded-md bg-surface-0/80 backdrop-blur-sm opacity-0 group-hover/card:opacity-70 hover:!opacity-100 transition-opacity"
+                      aria-label={"Expand #{name}"}
+                      title="Deep focus view"
+                    >
+                      <.icon name="hero-arrows-pointing-out-mini" class="w-3.5 h-3.5 text-muted" />
+                    </button>
+                  </div>
                 </div>
               </div>
             <% end %>
@@ -381,45 +406,61 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
 
                 <%= if !@idle_collapsed do %>
                   <div class="idle-agents-list space-y-1 animate-fade-in">
-                    <button
+                    <div
                       :for={name <- @idle_workers}
-                      phx-click="focus_card_agent"
-                      phx-value-agent={name}
-                      class="idle-agent-row group w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-150 hover:bg-surface-2/80 cursor-pointer"
+                      class="idle-agent-row group w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-150 hover:bg-surface-2/80"
                     >
-                      <%!-- Role icon mini-avatar --%>
-                      <span
-                        class="idle-role-avatar"
-                        style={"background: #{agent_role_accent(name, @agent_cards)}10; border: 1px solid #{agent_role_accent(name, @agent_cards)}12;"}
+                      <button
+                        phx-click="focus_card_agent"
+                        phx-value-agent={name}
+                        class="flex items-center gap-2.5 flex-1 min-w-0 cursor-pointer"
                       >
-                        {agent_role_icon(name, @agent_cards)}
-                      </span>
-                      <%!-- Name --%>
-                      <span
-                        class="text-xs font-medium truncate text-secondary group-hover:text-primary transition-colors"
-                        style={"color: #{LoomkinWeb.AgentColors.agent_color(name)}80;"}
+                        <%!-- Role icon mini-avatar --%>
+                        <span
+                          class="idle-role-avatar"
+                          style={"background: #{agent_role_accent(name, @agent_cards)}10; border: 1px solid #{agent_role_accent(name, @agent_cards)}12;"}
+                        >
+                          {agent_role_icon(name, @agent_cards)}
+                        </span>
+                        <%!-- Name --%>
+                        <span
+                          class="text-xs font-medium truncate text-secondary group-hover:text-primary transition-colors"
+                          style={"color: #{LoomkinWeb.AgentColors.agent_color(name)}80;"}
+                        >
+                          {name}
+                        </span>
+                        <%!-- Role badge --%>
+                        <span
+                          :if={
+                            @agent_cards[name] && !role_matches_name?(@agent_cards[name].role, name)
+                          }
+                          class="text-[9px] font-mono text-muted/40 truncate"
+                        >
+                          {format_agent_role(@agent_cards[name].role)}
+                        </span>
+                        <%!-- Task snippet --%>
+                        <span
+                          :if={@agent_cards[name] && @agent_cards[name].current_task}
+                          class="text-[9px] text-muted/30 truncate max-w-[120px] ml-auto"
+                        >
+                          {@agent_cards[name].current_task}
+                        </span>
+                      </button>
+                      <%!-- Expand button --%>
+                      <button
+                        phx-click="open_focus_modal"
+                        phx-value-agent={name}
+                        phx-target={@myself}
+                        class="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity flex-shrink-0 p-1 rounded"
+                        title="Deep focus view"
                       >
-                        {name}
-                      </span>
-                      <%!-- Role badge --%>
-                      <span
-                        :if={@agent_cards[name] && !role_matches_name?(@agent_cards[name].role, name)}
-                        class="text-[9px] font-mono text-muted/40 truncate"
-                      >
-                        {format_agent_role(@agent_cards[name].role)}
-                      </span>
-                      <%!-- Task snippet --%>
-                      <span
-                        :if={@agent_cards[name] && @agent_cards[name].current_task}
-                        class="text-[9px] text-muted/30 truncate max-w-[120px] ml-auto"
-                      >
-                        {@agent_cards[name].current_task}
-                      </span>
+                        <.icon name="hero-arrows-pointing-out-mini" class="w-3 h-3 text-muted" />
+                      </button>
                       <%!-- Reply button on hover --%>
-                      <span class="ml-auto opacity-0 group-hover:opacity-60 transition-opacity flex-shrink-0">
+                      <span class="opacity-0 group-hover:opacity-60 transition-opacity flex-shrink-0">
                         <.icon name="hero-chat-bubble-left-mini" class="w-3 h-3 text-muted" />
                       </span>
-                    </button>
+                    </div>
                   </div>
                 <% else %>
                   <%!-- Collapsed summary: role-tinted dots for each idle agent --%>
@@ -729,4 +770,544 @@ defmodule LoomkinWeb.MissionControlPanelComponent do
   end
 
   defp role_to_accent(_), do: @default_accent
+
+  # ── Focus Modal: tabbed agent deep-dive ──
+
+  defp render_focus_modal(assigns) do
+    ~H"""
+    <div
+      :if={@focus_modal_agent && @focus_modal_card}
+      id="focus-modal-overlay"
+      class="fixed inset-0 z-50 flex items-center justify-center focus-modal-overlay"
+      phx-window-keydown="close_focus_modal"
+      phx-key="Escape"
+      phx-target={@myself}
+    >
+      <%!-- Backdrop --%>
+      <div
+        class="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        phx-click="close_focus_modal"
+        phx-target={@myself}
+        aria-hidden="true"
+      />
+
+      <%!-- Modal content --%>
+      <div
+        class="relative z-10 w-full max-w-2xl max-h-[80vh] mx-4 flex flex-col rounded-2xl overflow-hidden focus-modal-container"
+        style={"border: 1px solid #{LoomkinWeb.AgentColors.agent_color(@focus_modal_agent)}20; box-shadow: 0 0 40px #{LoomkinWeb.AgentColors.agent_color(@focus_modal_agent)}10;"}
+      >
+        <%!-- Header: Agent identity + state + close --%>
+        <div
+          class="flex items-center gap-3 px-5 py-4 border-b border-border-subtle flex-shrink-0"
+          style={"background: linear-gradient(135deg, #{LoomkinWeb.AgentColors.agent_color(@focus_modal_agent)}08, transparent);"}
+        >
+          <%!-- Agent avatar --%>
+          <div
+            class="w-10 h-10 rounded-xl flex items-center justify-center text-base font-bold relative flex-shrink-0"
+            style={"background: #{LoomkinWeb.AgentColors.agent_color(@focus_modal_agent)}18; color: #{LoomkinWeb.AgentColors.agent_color(@focus_modal_agent)};"}
+          >
+            {String.first(@focus_modal_agent) |> String.upcase()}
+            <span class={[
+              "absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full ring-2 ring-surface-1",
+              modal_status_dot(@focus_modal_card.status)
+            ]} />
+          </div>
+
+          <%!-- Name + role + status --%>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <span
+                class="text-base font-semibold truncate"
+                style={"color: #{LoomkinWeb.AgentColors.agent_color(@focus_modal_agent)};"}
+              >
+                {@focus_modal_agent}
+              </span>
+              <span class={[
+                "text-[10px] font-medium px-2 py-0.5 rounded-full",
+                modal_status_pill(@focus_modal_card.status)
+              ]}>
+                {modal_status_label(@focus_modal_card.status)}
+              </span>
+            </div>
+            <div class="flex items-center gap-2 mt-0.5">
+              <span
+                :if={!role_matches_name?(@focus_modal_card.role, @focus_modal_agent)}
+                class="text-[11px] text-muted font-mono"
+              >
+                {format_agent_role(@focus_modal_card.role)}
+              </span>
+              <span
+                :if={@focus_modal_card.current_task}
+                class="text-[11px] text-muted truncate"
+              >
+                📋 {@focus_modal_card.current_task}
+              </span>
+            </div>
+          </div>
+
+          <%!-- Action buttons --%>
+          <div class="flex items-center gap-1 flex-shrink-0">
+            <button
+              phx-click="reply_to_card_agent"
+              phx-value-agent={@focus_modal_agent}
+              phx-value-team-id={@active_team_id}
+              class="p-2 rounded-lg hover:bg-surface-2 text-muted hover:text-brand transition-colors"
+              title="Reply to agent"
+            >
+              <.icon name="hero-chat-bubble-left-mini" class="w-4 h-4" />
+            </button>
+            <button
+              :if={@focus_modal_card.status == :working}
+              phx-click="pause_card_agent"
+              phx-value-agent={@focus_modal_agent}
+              phx-value-team-id={@active_team_id}
+              class="p-2 rounded-lg hover:bg-surface-2 text-muted hover:text-amber-400 transition-colors"
+              title="Pause agent"
+            >
+              <.icon name="hero-pause-circle-mini" class="w-4 h-4" />
+            </button>
+            <button
+              phx-click="close_focus_modal"
+              phx-target={@myself}
+              class="p-2 rounded-lg hover:bg-surface-2 text-muted hover:text-primary transition-colors"
+              title="Close"
+            >
+              <.icon name="hero-x-mark-mini" class="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        <%!-- Tab bar --%>
+        <div class="flex items-center gap-0.5 px-5 py-1.5 border-b border-border-subtle bg-surface-0/80 flex-shrink-0">
+          <button
+            :for={
+              {label, icon, tab_id} <- [
+                {"Activity", "hero-bolt-mini", "activity"},
+                {"History", "hero-clock-mini", "history"},
+                {"Tools", "hero-wrench-screwdriver-mini", "tools"},
+                {"Stats", "hero-chart-bar-mini", "stats"}
+              ]
+            }
+            phx-click="switch_focus_tab"
+            phx-value-tab={tab_id}
+            phx-target={@myself}
+            class={[
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+              if(to_string(@focus_modal_tab) == tab_id,
+                do: "bg-brand-subtle text-brand",
+                else: "text-muted hover:text-secondary hover:bg-surface-2/50"
+              )
+            ]}
+          >
+            <.icon name={icon} class="w-3.5 h-3.5" />
+            <span>{label}</span>
+          </button>
+        </div>
+
+        <%!-- Tab content --%>
+        <div class="flex-1 overflow-y-auto min-h-0 focus-modal-content">
+          {render_focus_tab(@focus_modal_tab, assigns)}
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # ── Focus modal tab renderers ──
+
+  defp render_focus_tab(:activity, assigns) do
+    ~H"""
+    <div class="p-5 space-y-4">
+      <%!-- Current thinking / streaming content --%>
+      <%= if @focus_modal_card.content_type in [:thinking, :streaming] && @focus_modal_card.latest_content do %>
+        <div class="space-y-1">
+          <div class="flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
+            <span class="text-[10px] font-semibold uppercase tracking-wider text-violet-400">
+              Thinking now
+            </span>
+          </div>
+          <div
+            class="text-sm leading-relaxed text-secondary agent-card-content rounded-lg px-3 py-2"
+            style={"background: #{LoomkinWeb.AgentColors.agent_color(@focus_modal_agent)}06; border-left: 2px solid #{LoomkinWeb.AgentColors.agent_color(@focus_modal_agent)}30;"}
+          >
+            {render_modal_markdown(@focus_modal_card.latest_content)}
+          </div>
+        </div>
+      <% end %>
+
+      <%!-- Last response --%>
+      <%= if @focus_modal_card[:last_response] do %>
+        <div class="space-y-1">
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-emerald-400/70">
+            Last response
+          </span>
+          <div class="text-sm leading-relaxed text-secondary agent-card-content rounded-lg px-3 py-2 bg-surface-1">
+            {render_modal_markdown(@focus_modal_card[:last_response])}
+          </div>
+        </div>
+      <% end %>
+
+      <%!-- Last tool call --%>
+      <div :if={@focus_modal_card.last_tool} class="space-y-1">
+        <span class="text-[10px] font-semibold uppercase tracking-wider text-muted/60">
+          Last tool
+        </span>
+        <div class="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-1 font-mono">
+          <span class="text-xs">{modal_tool_icon(@focus_modal_card.last_tool)}</span>
+          <span class="text-xs text-secondary">{modal_tool_label(@focus_modal_card.last_tool)}</span>
+        </div>
+      </div>
+
+      <%!-- Status summary --%>
+      <div class="space-y-1">
+        <span class="text-[10px] font-semibold uppercase tracking-wider text-muted/60">
+          Status summary
+        </span>
+        <div class="grid grid-cols-2 gap-2">
+          <div class="px-3 py-2 rounded-lg bg-surface-1">
+            <div class="text-[10px] text-muted/60 mb-0.5">Status</div>
+            <div class={["text-xs font-medium", modal_status_text(@focus_modal_card.status)]}>
+              {modal_status_label(@focus_modal_card.status)}
+            </div>
+          </div>
+          <div class="px-3 py-2 rounded-lg bg-surface-1">
+            <div class="text-[10px] text-muted/60 mb-0.5">Thoughts</div>
+            <div class="text-xs font-medium text-secondary">
+              {length(Map.get(@focus_modal_card, :thought_history, []))}
+            </div>
+          </div>
+          <div class="px-3 py-2 rounded-lg bg-surface-1">
+            <div class="text-[10px] text-muted/60 mb-0.5">Budget used</div>
+            <div class="text-xs font-medium text-secondary font-mono">
+              {modal_format_tokens(Map.get(@focus_modal_card, :budget_used, 0))}
+            </div>
+          </div>
+          <div class="px-3 py-2 rounded-lg bg-surface-1">
+            <div class="text-[10px] text-muted/60 mb-0.5">Content</div>
+            <div class="text-xs font-medium text-secondary">
+              {modal_content_type_label(@focus_modal_card.content_type)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <%!-- Empty state --%>
+      <div
+        :if={
+          @focus_modal_card.content_type not in [:thinking, :streaming] &&
+            !@focus_modal_card[:last_response] && !@focus_modal_card.last_tool
+        }
+        class="text-center py-8"
+      >
+        <div class="text-muted/40 text-sm">No active work to display</div>
+        <div class="text-muted/30 text-xs mt-1">This agent is standing by</div>
+      </div>
+    </div>
+    """
+  end
+
+  defp render_focus_tab(:history, assigns) do
+    history = Map.get(assigns.focus_modal_card, :thought_history, [])
+    agent_color = LoomkinWeb.AgentColors.agent_color(assigns.focus_modal_agent)
+    assigns = assign(assigns, history: history, agent_color: agent_color)
+
+    ~H"""
+    <div class="p-5 space-y-2">
+      <div :if={@history == []} class="text-center py-8">
+        <.icon name="hero-clock-mini" class="w-8 h-8 text-muted/20 mx-auto mb-2" />
+        <div class="text-muted/40 text-sm">No thought history yet</div>
+      </div>
+      <div
+        :for={{entry, idx} <- Enum.with_index(@history)}
+        id={"focus-thought-#{idx}"}
+        class="text-sm leading-relaxed agent-card-content rounded-lg px-3 py-2"
+        style={modal_thought_style(entry.type, @agent_color)}
+      >
+        <div class="flex items-center gap-1.5 mb-1">
+          <span class={modal_thought_badge(entry.type)}>
+            {modal_thought_label(entry.type)}
+          </span>
+          <span class="text-[9px] text-muted/40 font-mono">
+            {modal_format_time(entry.timestamp)}
+          </span>
+        </div>
+        <div class="line-clamp-8">{render_modal_markdown(entry.content)}</div>
+      </div>
+    </div>
+    """
+  end
+
+  defp render_focus_tab(:tools, assigns) do
+    last_tool = assigns.focus_modal_card.last_tool
+    assigns = assign(assigns, last_tool: last_tool)
+
+    ~H"""
+    <div class="p-5 space-y-3">
+      <div :if={!@last_tool} class="text-center py-8">
+        <.icon name="hero-wrench-screwdriver-mini" class="w-8 h-8 text-muted/20 mx-auto mb-2" />
+        <div class="text-muted/40 text-sm">No tool activity recorded</div>
+      </div>
+
+      <div :if={@last_tool} class="space-y-2">
+        <span class="text-[10px] font-semibold uppercase tracking-wider text-muted/60">
+          Last tool execution
+        </span>
+        <div class="px-4 py-3 rounded-lg bg-surface-1 space-y-2">
+          <div class="flex items-center gap-2">
+            <span class="text-lg">{modal_tool_icon(@last_tool)}</span>
+            <span class="text-sm font-medium text-primary">
+              {@last_tool[:name] || @last_tool.name}
+            </span>
+          </div>
+          <div :if={@last_tool[:target]} class="text-xs font-mono text-muted truncate">
+            {@last_tool[:target]}
+          </div>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp render_focus_tab(:stats, assigns) do
+    card = assigns.focus_modal_card
+    thought_count = length(Map.get(card, :thought_history, []))
+    budget = Map.get(card, :budget_used, 0)
+    agent_color = LoomkinWeb.AgentColors.agent_color(assigns.focus_modal_agent)
+
+    assigns =
+      assigns
+      |> assign(:stats_card, card)
+      |> assign(:thought_count, thought_count)
+      |> assign(:budget, budget)
+      |> assign(:agent_color, agent_color)
+
+    ~H"""
+    <div class="p-5 space-y-4">
+      <%!-- Visual state indicator --%>
+      <div class="flex justify-center py-3">
+        <div
+          class={[
+            "w-20 h-20 rounded-2xl flex items-center justify-center text-2xl font-bold relative",
+            modal_state_glow(@stats_card.status)
+          ]}
+          style={"background: #{@agent_color}12; color: #{@agent_color};"}
+        >
+          {String.first(@focus_modal_agent) |> String.upcase()}
+          <span class={[
+            "absolute -bottom-1 -right-1 w-4 h-4 rounded-full ring-2 ring-surface-2",
+            modal_status_dot(@stats_card.status)
+          ]} />
+        </div>
+      </div>
+
+      <%!-- Stats grid --%>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="px-4 py-3 rounded-xl bg-surface-1 text-center">
+          <div class="text-2xl font-bold tabular-nums text-primary">{@thought_count}</div>
+          <div class="text-[10px] text-muted/60 uppercase tracking-wider mt-1">Thoughts</div>
+        </div>
+        <div class="px-4 py-3 rounded-xl bg-surface-1 text-center">
+          <div class="text-2xl font-bold tabular-nums text-primary font-mono">
+            {modal_format_tokens(@budget)}
+          </div>
+          <div class="text-[10px] text-muted/60 uppercase tracking-wider mt-1">Tokens</div>
+        </div>
+      </div>
+
+      <%!-- Details list --%>
+      <div class="space-y-2">
+        <div class="flex items-center justify-between py-1.5 border-b border-border-subtle">
+          <span class="text-xs text-muted">Role</span>
+          <span class="text-xs text-secondary font-medium">
+            {format_agent_role(@stats_card.role)}
+          </span>
+        </div>
+        <div class="flex items-center justify-between py-1.5 border-b border-border-subtle">
+          <span class="text-xs text-muted">Status</span>
+          <span class={["text-xs font-medium", modal_status_text(@stats_card.status)]}>
+            {modal_status_label(@stats_card.status)}
+          </span>
+        </div>
+        <div class="flex items-center justify-between py-1.5">
+          <span class="text-xs text-muted">Current task</span>
+          <span class="text-xs text-secondary truncate max-w-[200px]">
+            {@stats_card.current_task || "—"}
+          </span>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp render_focus_tab(_, assigns) do
+    ~H"""
+    <div class="text-center py-8 text-muted/40 text-sm">Unknown tab</div>
+    """
+  end
+
+  # ── Focus modal helpers ──
+
+  defp modal_status_dot(:working), do: "bg-green-400 agent-dot-working"
+  defp modal_status_dot(:idle), do: "bg-zinc-500"
+  defp modal_status_dot(:error), do: "bg-red-400"
+  defp modal_status_dot(:paused), do: "bg-blue-400 animate-pulse"
+  defp modal_status_dot(:approval_pending), do: "bg-violet-500 animate-pulse"
+  defp modal_status_dot(:ask_user_pending), do: "bg-cyan-500 animate-pulse"
+  defp modal_status_dot(:awaiting_synthesis), do: "bg-indigo-500 animate-pulse"
+  defp modal_status_dot(:suspended_healing), do: "bg-amber-400 animate-pulse"
+  defp modal_status_dot(:crashed), do: "bg-red-500 animate-pulse"
+  defp modal_status_dot(:recovering), do: "bg-amber-400 animate-pulse"
+  defp modal_status_dot(:complete), do: "bg-emerald-400"
+  defp modal_status_dot(_), do: "bg-zinc-500"
+
+  defp modal_status_label(:working), do: "Working"
+  defp modal_status_label(:idle), do: "Idle"
+  defp modal_status_label(:paused), do: "Paused"
+  defp modal_status_label(:error), do: "Error"
+  defp modal_status_label(:approval_pending), do: "Awaiting Approval"
+  defp modal_status_label(:ask_user_pending), do: "Waiting for You"
+  defp modal_status_label(:awaiting_synthesis), do: "Synthesizing"
+  defp modal_status_label(:suspended_healing), do: "Healing"
+  defp modal_status_label(:crashed), do: "Crashed"
+  defp modal_status_label(:recovering), do: "Recovering"
+  defp modal_status_label(:complete), do: "Complete"
+  defp modal_status_label(:permanently_failed), do: "Failed"
+  defp modal_status_label(_), do: "Unknown"
+
+  defp modal_status_pill(:working), do: "bg-green-500/15 text-green-400"
+  defp modal_status_pill(:idle), do: "bg-zinc-500/15 text-zinc-400"
+  defp modal_status_pill(:paused), do: "bg-blue-500/15 text-blue-400"
+  defp modal_status_pill(:error), do: "bg-red-500/15 text-red-400"
+  defp modal_status_pill(:crashed), do: "bg-red-500/15 text-red-400"
+  defp modal_status_pill(:approval_pending), do: "bg-violet-500/15 text-violet-400"
+  defp modal_status_pill(:ask_user_pending), do: "bg-cyan-500/15 text-cyan-400"
+  defp modal_status_pill(:awaiting_synthesis), do: "bg-indigo-500/15 text-indigo-400"
+  defp modal_status_pill(:suspended_healing), do: "bg-amber-500/15 text-amber-400"
+  defp modal_status_pill(:complete), do: "bg-emerald-500/15 text-emerald-400"
+  defp modal_status_pill(_), do: "bg-zinc-500/15 text-zinc-400"
+
+  defp modal_status_text(:working), do: "text-green-400"
+  defp modal_status_text(:idle), do: "text-zinc-400"
+  defp modal_status_text(:error), do: "text-red-400"
+  defp modal_status_text(:crashed), do: "text-red-400"
+  defp modal_status_text(:paused), do: "text-blue-400"
+  defp modal_status_text(:complete), do: "text-emerald-400"
+  defp modal_status_text(:approval_pending), do: "text-violet-400"
+  defp modal_status_text(:suspended_healing), do: "text-amber-400"
+  defp modal_status_text(_), do: "text-zinc-400"
+
+  defp modal_state_glow(:working), do: "ring-2 ring-green-500/20 shadow-lg shadow-green-500/5"
+  defp modal_state_glow(:error), do: "ring-2 ring-red-500/20 shadow-lg shadow-red-500/5"
+  defp modal_state_glow(:crashed), do: "ring-2 ring-red-500/30 shadow-lg shadow-red-500/10"
+
+  defp modal_state_glow(:approval_pending),
+    do: "ring-2 ring-violet-500/20 shadow-lg shadow-violet-500/5"
+
+  defp modal_state_glow(:suspended_healing),
+    do: "ring-2 ring-amber-500/20 shadow-lg shadow-amber-500/5"
+
+  defp modal_state_glow(_), do: ""
+
+  defp modal_content_type_label(:thinking), do: "Thinking"
+  defp modal_content_type_label(:streaming), do: "Streaming"
+  defp modal_content_type_label(:message), do: "Message"
+  defp modal_content_type_label(:tool_call), do: "Tool call"
+  defp modal_content_type_label(:last_thinking), do: "Last thought"
+  defp modal_content_type_label(:idle), do: "Idle"
+  defp modal_content_type_label(nil), do: "Idle"
+  defp modal_content_type_label(other), do: to_string(other)
+
+  @modal_tool_icons %{
+    "file_read" => "📄",
+    "file_write" => "✍",
+    "file_edit" => "✎",
+    "file_search" => "🔍",
+    "content_search" => "🔍",
+    "directory_list" => "📁",
+    "shell" => "⚡",
+    "git" => "📈",
+    "peer_message" => "💬",
+    "peer_discovery" => "📡",
+    "peer_create_task" => "📋",
+    "peer_complete_task" => "✅",
+    "peer_ask_question" => "❓",
+    "context_offload" => "💾",
+    "context_retrieve" => "📥",
+    "decision_log" => "📝",
+    "ask_user" => "🙋"
+  }
+
+  defp modal_tool_icon(nil), do: "⚙"
+  defp modal_tool_icon(%{name: name}), do: Map.get(@modal_tool_icons, name, "⚙")
+  defp modal_tool_icon(_), do: "⚙"
+
+  defp modal_tool_label(nil), do: "—"
+
+  defp modal_tool_label(%{target: target, name: name}) when is_binary(target) and target != "",
+    do: "#{name}: #{target}"
+
+  defp modal_tool_label(%{name: name}), do: name
+  defp modal_tool_label(_), do: "—"
+
+  defp modal_format_tokens(n) when is_integer(n) and n >= 1_000_000,
+    do: "#{Float.round(n / 1_000_000, 1)}M"
+
+  defp modal_format_tokens(n) when is_integer(n) and n >= 1_000,
+    do: "#{Float.round(n / 1_000, 1)}k"
+
+  defp modal_format_tokens(n) when is_integer(n), do: "#{n}"
+  defp modal_format_tokens(_), do: "0"
+
+  defp modal_format_time(%DateTime{} = dt), do: Calendar.strftime(dt, "%H:%M:%S")
+  defp modal_format_time(_), do: ""
+
+  defp modal_thought_style(:thinking, agent_color) do
+    "color: var(--text-secondary); background: #{agent_color}06; border-left: 2px solid #{agent_color}20;"
+  end
+
+  defp modal_thought_style(:message, _agent_color) do
+    "color: var(--text-secondary); background: rgba(52, 211, 153, 0.04); border-left: 2px solid rgba(52, 211, 153, 0.2);"
+  end
+
+  defp modal_thought_style(_, agent_color) do
+    "color: var(--text-secondary); background: #{agent_color}04; border-left: 2px solid #{agent_color}10;"
+  end
+
+  defp modal_thought_badge(:thinking),
+    do: "text-[9px] font-medium text-violet-400/70 uppercase tracking-wider"
+
+  defp modal_thought_badge(:message),
+    do: "text-[9px] font-medium text-emerald-400/70 uppercase tracking-wider"
+
+  defp modal_thought_badge(_),
+    do: "text-[9px] font-medium text-muted/50 uppercase tracking-wider"
+
+  defp modal_thought_label(:thinking), do: "thought"
+  defp modal_thought_label(:message), do: "response"
+  defp modal_thought_label(type), do: to_string(type)
+
+  defp render_modal_markdown(nil), do: ""
+  defp render_modal_markdown(""), do: ""
+
+  defp render_modal_markdown(content) when is_binary(content) do
+    trimmed = String.trim(content)
+
+    if trimmed == "" do
+      ""
+    else
+      doc = MDEx.new() |> MDEx.Document.put_markdown(trimmed)
+
+      case MDEx.to_html(doc) do
+        {:ok, html} ->
+          Phoenix.HTML.raw(html)
+
+        _ ->
+          {:safe, escaped} = Phoenix.HTML.html_escape(trimmed)
+          Phoenix.HTML.raw("<p>#{escaped}</p>")
+      end
+    end
+  end
+
+  defp render_modal_markdown(_), do: ""
 end

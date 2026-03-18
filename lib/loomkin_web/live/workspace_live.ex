@@ -3934,7 +3934,7 @@ defmodule LoomkinWeb.WorkspaceLive do
 
       <%!-- ── Main Content — Mission Control layout ── --%>
       <div id="main-content" class="flex flex-1 min-h-0 flex-col xl:flex-row">
-        <%!-- Left: Kin Cards + Comms (full height) + Composer --%>
+        <%!-- Left: Kin Cards + Comms (full height) + Concierge + Composer --%>
         <div
           id="mc-main-container"
           class="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden"
@@ -3969,6 +3969,23 @@ defmodule LoomkinWeb.WorkspaceLive do
               module={LoomkinWeb.AskUserComponent}
               id="ask-user-questions-mc"
               questions={@pending_questions}
+            />
+          </div>
+
+          <%!-- Concierge card pinned directly above composer for proximity --%>
+          <div
+            :if={@concierge_card_names != []}
+            class="flex-shrink-0 px-4 pt-2 pb-1 border-t border-border-subtle bg-surface-0/80"
+          >
+            <.live_component
+              :for={name <- @concierge_card_names}
+              module={LoomkinWeb.AgentCardComponent}
+              id={"agent-card-concierge-#{name}"}
+              card={@agent_cards[name]}
+              focused={false}
+              team_id={@active_team_id}
+              model={@agent_cards[name][:model]}
+              compact={true}
             />
           </div>
 

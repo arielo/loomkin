@@ -29,6 +29,7 @@ defmodule LoomkinWeb.AgentCardComponent do
      assign(socket,
        card: nil,
        focused: false,
+       compact: false,
        team_id: nil,
        model: nil,
        rendered_content: "",

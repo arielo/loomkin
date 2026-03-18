@@ -940,6 +940,86 @@ body {
 .event-card-context { border-left: 2px solid #a78bfa; }
 .event-card-streaming { border-left: 2px solid #818cf8; animation: pulse-border 2s ease-in-out infinite; }
 
+/* ── Focus Modal — Tabbed Agent Deep-Focus View ── */
+.focus-modal-overlay {
+  animation: focus-modal-fade-in 0.15s ease-out;
+}
+.focus-modal-container {
+  background: var(--surface-1);
+  animation: focus-modal-slide-up 0.2s ease-out;
+}
+.focus-modal-content {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.08) transparent;
+}
+.focus-modal-content::-webkit-scrollbar { width: 5px; }
+.focus-modal-content::-webkit-scrollbar-track { background: transparent; }
+.focus-modal-content::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+}
+.focus-modal-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.15);
+}
+
+@keyframes focus-modal-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes focus-modal-slide-up {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── Agent Card Work Summary Cue ── */
+.agent-card-summary-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  z-index: 5;
+}
+
+/* ── Agent Card Awaiting Synthesis State ── */
+.agent-card-awaiting-synthesis {
+  border-color: rgba(99, 102, 241, 0.2);
+  animation: synthesis-pulse 3s ease-in-out infinite;
+}
+@keyframes synthesis-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+  50% { box-shadow: 0 0 12px 0 rgba(99, 102, 241, 0.1); }
+}
+
+/* ── Agent Card Healing State ── */
+.agent-card-healing {
+  border-color: rgba(245, 158, 11, 0.2);
+  animation: healing-pulse 2.5s ease-in-out infinite;
+}
+@keyframes healing-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+  50% { box-shadow: 0 0 10px 0 rgba(245, 158, 11, 0.08); }
+}
+
+/* ── Agent Card Asking State ── */
+.agent-card-asking {
+  border-color: rgba(6, 182, 212, 0.2);
+  animation: asking-pulse 2s ease-in-out infinite;
+}
+@keyframes asking-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0); }
+  50% { box-shadow: 0 0 12px 0 rgba(6, 182, 212, 0.1); }
+}
+
+/* ── Agent Card Approval State ── */
+.agent-card-approval {
+  border-color: rgba(124, 58, 237, 0.25);
+  animation: approval-glow 2s ease-in-out infinite;
+}
+@keyframes approval-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0); }
+  50% { box-shadow: 0 0 15px 0 rgba(124, 58, 237, 0.12); }
+}
+
 /* ══════════════════════════════════════════
    File Preview - Syntax Highlighting
    (highlight.js Atom One Dark theme, trimmed)
