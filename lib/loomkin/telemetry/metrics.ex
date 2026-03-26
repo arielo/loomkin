@@ -160,7 +160,12 @@ defmodule Loomkin.Telemetry.Metrics do
       {"loomkin-metrics-team-escalation", [:loomkin, :team, :escalation],
        &__MODULE__.handle_team_escalation/4},
       {"loomkin-metrics-team-budget-warning", [:loomkin, :team, :budget, :warning],
-       &__MODULE__.handle_team_budget_warning/4}
+       &__MODULE__.handle_team_budget_warning/4},
+      {"loomkin-metrics-context-window-build", [:loomkin, :context, :window, :build],
+       &__MODULE__.handle_context_window_build/4},
+      {"loomkin-metrics-tool-decision", [:loomkin, :agent, :tool, :decision],
+       &__MODULE__.handle_tool_decision/4},
+      {"loomkin-metrics-team-spawn", [:loomkin, :team, :spawn], &__MODULE__.handle_team_spawn/4}
     ]
 
     for {id, event, fun} <- handlers do
@@ -405,5 +410,60 @@ defmodule Loomkin.Telemetry.Metrics do
   rescue
     _e ->
       :ok
+  end
+
+  defp broadcast_team(_team_id, {:team_spawn, _payload}) do
+    :ok
+  end
+
+  # --- New telemetry handlers for custom events ---
+  def handle_team_spawn(_event, _measurements, metadata, _config) do
+    team_id = metadata[:team_id]
+    agent_count = metadata[:agent_count] || 0
+    spawned_agents = metadata[:spawned_agents] || []
+
+    CostTracker.record_team_spawn(team_id, agent_count, spawned_agents)
+
+    broadcast_team(
+      team_id,
+      {:team_spawn, %{team_id: team_id, agent_count: agent_count, spawned_agents: spawned_agents}}
+    )
+  end
+
+  def handle_context_window_build(_event, _measurements, metadata, _config) do
+    session_id = metadata[:session_id]
+    _window_size = metadata[:window_size] || 0
+    tokens_added = metadata[:tokens_added] || 0
+
+    update_session(session_id, fn m ->
+      %{m | last_activity: DateTime.utc_now()}
+    end)
+
+    update_global(fn g ->
+      %{g | total_tokens: g.total_tokens + tokens_added}
+    end)
+  end
+
+  def handle_tool_decision(_event, _measurements, metadata, _config) do
+    session_id = metadata[:session_id]
+    tool_name = metadata[:tool_name] || "unknown"
+    decision = metadata[:decision] || :unknown
+
+    update_session(session_id, fn m ->
+      %{m | decisions: m.decisions + 1, last_activity: DateTime.utc_now()}
+    end)
+
+    update_map(
+      :tools,
+      tool_name,
+      fn stats ->
+        %{
+          stats
+          | decisions:
+              Map.put(stats.decisions || %{}, decision, (stats.decisions[decision] || 0) + 1)
+        }
+      end,
+      %{count: 1, decisions: %{decision => 1}}
+    )
   end
 end

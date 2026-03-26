@@ -85,6 +85,24 @@ defmodule Loomkin.Telemetry do
     )
   end
 
+  @doc "Emits a context window build telemetry event."
+  def emit_context_window_build(metadata) do
+    :telemetry.execute(
+      [:loomkin, :context, :window, :build],
+      %{system_time: System.system_time()},
+      metadata
+    )
+  end
+
+  @doc "Emits a tool decision telemetry event."
+  def emit_tool_decision(metadata) do
+    :telemetry.execute(
+      [:loomkin, :agent, :tool, :decision],
+      %{system_time: System.system_time()},
+      metadata
+    )
+  end
+
   defp extract_usage(%ReqLLM.Response{} = response) do
     case ReqLLM.Response.usage(response) do
       %{} = usage ->

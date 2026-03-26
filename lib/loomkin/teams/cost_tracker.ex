@@ -9,6 +9,7 @@ defmodule Loomkin.Teams.CostTracker do
   @table :loomkin_cost_tracker
   @max_call_history 500
   @max_escalations 500
+  @max_team_spawns 100
 
   def init do
     if :ets.whereis(@table) == :undefined do
@@ -189,10 +190,34 @@ defmodule Loomkin.Teams.CostTracker do
       {{:agent, ^team_id, _name}, _, _, _, _, _} = entry -> :ets.delete(@table, elem(entry, 0))
       {{:calls, ^team_id, _name}, _} = entry -> :ets.delete(@table, elem(entry, 0))
       {{:escalations, ^team_id}, _} -> :ets.delete(@table, {:escalations, team_id})
+      {{:spawns, ^team_id}, _} -> :ets.delete(@table, {:spawns, team_id})
       _ -> :ok
     end)
 
     :ok
+  end
+
+  @doc "Record a team spawn event."
+  def record_team_spawn(team_id, agent_count, spawned_agents) do
+    init_if_needed()
+    key = {:spawns, team_id}
+
+    entry = %{
+      timestamp: DateTime.utc_now(),
+      agent_count: agent_count,
+      spawned_agents: spawned_agents
+    }
+
+    current = lookup_or_default(key, [])
+    :ets.insert(@table, {key, Enum.take([entry | current], @max_team_spawns)})
+    :ok
+  end
+
+  @doc "List all team spawn events for a team."
+  def list_team_spawns(team_id) do
+    init_if_needed()
+    key = {:spawns, team_id}
+    lookup_or_default(key, []) |> Enum.reverse()
   end
 
   # -- Private --
