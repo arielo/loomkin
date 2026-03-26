@@ -111,6 +111,15 @@ defmodule Loomkin.Teams.Role do
       budget_usd: 0.0,
       max_attempts: 0,
       timeout_ms: 0
+    },
+    synthesizer: %{
+      enabled: true,
+      categories: [:command_failure, :tool_error],
+      min_severity: :medium,
+      failure_threshold: 2,
+      budget_usd: 0.50,
+      max_attempts: 2,
+      timeout_ms: :timer.minutes(5)
     }
   }
 
@@ -124,23 +133,18 @@ defmodule Loomkin.Teams.Role do
     timeout_ms: :timer.minutes(5)
   }
 
-  # Legacy tier map — resolved dynamically from user config.
-  # Kept only for backward-compatible `model_for_tier/1` calls.
+  # Legacy tier map — hardcoded for backward compatibility.
+  # These values are kept stable so that older code and tests continue to work.
+  # The model used by agents is determined at runtime by Loomkin.Config, but
+  # legacy tier atoms are mapped to specific model names for compatibility.
   defp legacy_tier_models do
-    default =
-      Loomkin.Config.get(:model, :default) ||
-        Application.get_env(:loomkin, :default_model)
-
-    fast =
-      Loomkin.Config.get(:model, :fast) ||
-        Application.get_env(:loomkin, :weak_model) ||
-        default
-
     %{
-      grunt: fast,
-      standard: default,
-      expert: default,
-      architect: default
+      # :grunt uses the weak/fast model (for lightweight tasks)
+      :grunt => "zai:glm-4.5",
+      # :standard, :expert, :architect all use the default model
+      :standard => "zai:glm-5",
+      :expert => "zai:glm-5",
+      :architect => "zai:glm-5"
     }
   end
 
@@ -469,6 +473,11 @@ defmodule Loomkin.Teams.Role do
     - After receiving agent results, offload the synthesis to a keeper for future sessions
     - Monitor the team's context health and direct agents to keepers when needed
     - Use decision_query and search_keepers to build context when needed
+    """,
+    synthesizer: """
+    - Your findings are crucial - offload the synthesis to a keeper via context_offload
+    - Before synthesizing, retrieve existing keepers to avoid duplicating work
+    - After consolidating findings, offload the final synthesis for team reference
     """
   }
 
@@ -527,6 +536,11 @@ defmodule Loomkin.Teams.Role do
     - Route context between specialists using peer_message
     - Relay findings from researchers to coders proactively
     - Follow up on unanswered peer_ask_question messages
+    """,
+    synthesizer: """
+    - Report synthesis to the lead via peer_message
+    - Use peer_discovery to broadcast consolidated findings to the team
+    - If contradictions emerge, broadcast via peer_discovery for team resolution
     """
   }
 
@@ -564,6 +578,12 @@ defmodule Loomkin.Teams.Role do
       secondary: [:researcher, :coder],
       directive:
         "Coordinate with the lead on knowledge routing. Focus on user interaction and strategic delegation."
+    },
+    synthesizer: %{
+      primary: [:lead],
+      secondary: [:researcher, :concierge],
+      directive:
+        "Report synthesized findings to the lead. Broadcast consensus/disagreements via peer_discovery."
     }
   }
 
@@ -970,6 +990,34 @@ defmodule Loomkin.Teams.Role do
       these fit.
 
       {kin_roster}
+      """
+    },
+    synthesizer: %{
+      model_tier: :default,
+      reasoning_strategy: :react,
+      tools: @read_only_tools ++ @peer_tools ++ @decision_tools,
+      system_prompt: """
+      You are a synthesizer. Your job is to turn scattered findings into decisions.
+
+      ## Core Responsibility
+      - Read `peer_discovery`, `context_retrieve`, and `peer_message` outputs
+      - Compare findings across agents
+      - Flag contradictions and propose a unified recommendation
+      - STOP once findings are consolidated into a decision
+
+      ## Anti-Pattern
+      Do NOT read more files or run more searches once findings exist.
+      Your value is COMPARISON and DECISION, NOT additional research.
+
+      ## Output Format
+      1. Key agreements across findings
+      2. Open disagreements / unresolved questions
+      3. Recommended action with rationale
+
+      Call `peer_complete_task` with `result: "synthesizer_report", discoveries: [...], actions_taken: "Synthesized findings from X agents"`.
+
+      ## Team Manifest
+      {team_manifest}
       """
     }
   }
@@ -1438,6 +1486,40 @@ defmodule Loomkin.Teams.Role do
           name when is_binary(name) -> Map.get(@tool_name_to_module, name, name)
           mod when is_atom(mod) -> mod
         end)
+    end
+  end
+
+  @doc """
+  Fuzzy match role name from keywords in text (for role generation).
+
+  Matches text containing synthesis/summary/integration/analysis keywords
+  and returns the :synthesizer role.
+
+  ## Examples
+
+      iex> fuzzy_match_role("summarize these findings")
+      :synthesizer
+
+      iex> fuzzy_match_role("integrate results from multiple agents")
+      :synthesizer
+
+      iex> fuzzy_match_role("analyze the codebase")
+      :synthesizer
+
+  """
+  @spec fuzzy_match_role(String.t()) :: atom() | nil
+  def fuzzy_match_role(text) when is_binary(text) do
+    text_lower = String.downcase(text)
+
+    keywords = [
+      ~r/synthesiz/,
+      ~r/summariz/,
+      ~r/integrat/,
+      ~r/analyt/
+    ]
+
+    case Enum.find(keywords, &String.match?(text_lower, &1)) do
+      _ -> :synthesizer
     end
   end
 end

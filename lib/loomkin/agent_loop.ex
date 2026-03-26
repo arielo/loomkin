@@ -229,6 +229,8 @@ defmodule Loomkin.AgentLoop do
       })
     end
 
+    Process.put(:loomkin_llm_call_start, :erlang.monotonic_time(:millisecond))
+
     case Loomkin.LLMRetry.with_retry([on_retry: on_retry], fn ->
            LoomkinTelemetry.span_llm_request(telemetry_meta, fn ->
              call_llm(provider, model_id, req_messages, [{:stream_config, config} | opts])
@@ -253,6 +255,13 @@ defmodule Loomkin.AgentLoop do
          config,
          iteration
        ) do
+    usage = extract_usage(response)
+    duration_ms = extract_duration_ms(config)
+
+    Logger.info(
+      "[Kin:llm.call] model=#{config.model} input_tokens=#{usage.input_tokens} output_tokens=#{usage.output_tokens} duration_ms=#{duration_ms}"
+    )
+
     emit(config, :tool_calls_received, %{
       tool_calls: classified.tool_calls,
       text: classified.text
@@ -317,13 +326,19 @@ defmodule Loomkin.AgentLoop do
          config,
          _iteration
        ) do
+    usage = extract_usage(response)
+    duration_ms = extract_duration_ms(config)
+
+    Logger.info(
+      "[Kin:llm.call] model=#{config.model} input_tokens=#{usage.input_tokens} output_tokens=#{usage.output_tokens} duration_ms=#{duration_ms}"
+    )
+
     response_text = classified.text
 
     assistant_msg = %{role: :assistant, content: response_text}
     messages = messages ++ [assistant_msg]
     emit(config, :new_message, assistant_msg)
 
-    usage = extract_usage(response)
     emit_usage(config, response)
 
     {:ok, response_text, messages, %{usage: usage}}
@@ -475,6 +490,10 @@ defmodule Loomkin.AgentLoop do
                   {:ok, messages}
 
                 :allow ->
+                  Logger.debug(
+                    "[Kin:tool.exec] session=#{config.session_id} tool_name=#{tool_name} agent=#{config.agent_name} project_path=#{effective_path} allowed_by_role?=#{role_allowed}"
+                  )
+
                   raw_result = run_tool(tool_module, tool_args, context, config)
 
                   result_text =
@@ -485,6 +504,10 @@ defmodule Loomkin.AgentLoop do
                       :ok ->
                         raw_result
                     end
+
+                  Logger.debug(
+                    "[Kin:tool.complete] session=#{config.session_id} tool_name=#{tool_name} duration_ms=NOT_MEASURED error?=#{String.starts_with?(result_text, "Error:")} category=NOT_MEASURED"
+                  )
 
                   # Track successful file_read calls
                   maybe_track_read_file(tool_name, tool_args, effective_path, result_text)
@@ -650,6 +673,12 @@ defmodule Loomkin.AgentLoop do
 
     # Redact secrets before the result reaches PubSub, logs, or LLM context
     result_text = Redactor.redact(result_text)
+
+    category = if String.starts_with?(result_text, "Error:"), do: "error", else: "success"
+
+    Logger.debug(
+      "[Kin:tool.complete] session=#{config.session_id} tool_name=#{tool_name} duration_ms=N/A error?=#{String.starts_with?(result_text, "Error:")} category=#{category}"
+    )
 
     emit(config, :tool_complete, %{tool_name: tool_name, result: result_text})
 
@@ -946,7 +975,16 @@ defmodule Loomkin.AgentLoop do
     end
   end
 
-  defp maybe_auto_offload(messages, _config), do: messages
+  defp extract_duration_ms(_config) do
+    case Process.get(:loomkin_llm_call_start) do
+      start_time when is_number(start_time) ->
+        end_time = :erlang.monotonic_time(:millisecond)
+        end_time - start_time
+
+      _ ->
+        0
+    end
+  end
 
   defp maybe_acquire_rate_limit(%{rate_limiter: nil}, _provider), do: :ok
   defp maybe_acquire_rate_limit(%{rate_limiter: callback}, provider), do: callback.(provider)

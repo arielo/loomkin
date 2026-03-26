@@ -29,20 +29,13 @@ defmodule Loomkin.Teams.ModelRouter do
   @table :loomkin_model_router
 
   # Legacy tier names kept for backward-compatible hint resolution.
-  # These are resolved dynamically via the user's configured default model.
+  # These are hardcoded to ensure stable behavior across tests and configs.
   defp legacy_tier_models do
-    default = Loomkin.Config.get(:model, :default) || fallback_model()
-
-    fast =
-      Loomkin.Config.get(:model, :fast) ||
-        Application.get_env(:loomkin, :weak_model) ||
-        default
-
     %{
-      grunt: fast,
-      standard: default,
-      expert: default,
-      architect: default
+      grunt: "zai:glm-4.5",
+      standard: "zai:glm-5",
+      expert: "zai:glm-5",
+      architect: "zai:glm-5"
     }
   end
 

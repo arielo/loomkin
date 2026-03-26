@@ -35,6 +35,11 @@ defmodule Loomkin.LLMRetry do
     Loomkin.Config.get(:agents, :llm_base_backoff_ms) || @base_backoff_ms
   end
 
+  defp jitter_factor do
+    # Prevent thundering herd - randomize backoff by ±25%
+    :rand.uniform() * 0.5 + 0.75
+  end
+
   defp do_retry(_fun, _on_retry, max_retries, attempt) when attempt > max_retries do
     {:error, :max_retries_exhausted}
   end

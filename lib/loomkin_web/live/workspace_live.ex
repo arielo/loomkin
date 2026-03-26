@@ -1,6 +1,8 @@
 defmodule LoomkinWeb.WorkspaceLive do
   use LoomkinWeb, :live_view
 
+  require Logger
+
   alias Loomkin.Session
   alias Loomkin.Session.Manager
   alias Loomkin.Teams
@@ -1783,6 +1785,10 @@ defmodule LoomkinWeb.WorkspaceLive do
   end
 
   def handle_info(%Jido.Signal{type: "team.ask_user.question"} = sig, socket) do
+    Logger.info(
+      "[Kin:ask_user.signal] team_id=#{inspect(Map.get(sig.data, :team_id, "unknown"))} agent=#{inspect(Map.get(sig.data, :agent_name, "unknown"))}"
+    )
+
     handle_info({:ask_user_question, sig.data}, socket)
   end
 
@@ -3092,6 +3098,10 @@ defmodule LoomkinWeb.WorkspaceLive do
 
   def handle_info({:ask_user_question, question}, socket) do
     questions = [question | socket.assigns.pending_questions]
+
+    Logger.debug(
+      "[Kin:ask_user.queue] question_id=#{question.question_id} agent=#{question.agent_name} queue_len=#{length(questions)}"
+    )
 
     event = %{
       id: Ecto.UUID.generate(),

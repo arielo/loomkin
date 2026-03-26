@@ -50,7 +50,15 @@ defmodule Loomkin.Session.ContextWindow do
 
     history = max(total - zone_sum, 0)
 
-    Map.put(zones, :history, history)
+    budget = Map.put(zones, :history, history)
+
+    session_id = Keyword.get(opts, :session_id)
+
+    Logger.debug(
+      "[Kin:context.budget] session=#{session_id || "unknown"} model=#{model || "unknown"} budget=#{inspect(budget)}"
+    )
+
+    budget
   end
 
   @doc """
@@ -312,7 +320,11 @@ defmodule Loomkin.Session.ContextWindow do
       usage = (estimate_tokens(enriched_system) + history_tokens) / total * 100
       threshold = max_utilization_pct(model)
 
-      if usage > threshold do
+      if usage >= threshold do
+        Logger.debug(
+          "[Kin:context.pressure] session=#{session_id || "unknown"} usage_pct=#{round(usage)}% threshold_pct=#{threshold}% evicted_count=0"
+        )
+
         pressure_msg = %{
           role: :system,
           content:
@@ -578,9 +590,19 @@ defmodule Loomkin.Session.ContextWindow do
 
     case :ets.lookup(@cache_table, key) do
       [{^key, repo_map, cached_at}] when now - cached_at < @repo_map_ttl_ms ->
+        ttl_remaining = @repo_map_ttl_ms - (now - cached_at)
+
+        Logger.debug(
+          "[Kin:repo_map.cache] hit=true ttl_remaining=#{div(ttl_remaining, 1000)}s generation_time_ms=N/A tokens=N/A relevance_score=N/A"
+        )
+
         repo_map
 
       _ ->
+        Logger.debug(
+          "[Kin:repo_map.cache] hit=false ttl_remaining=0 generation_time_ms=N/A tokens=N/A relevance_score=N/A"
+        )
+
         repo_map = generate_repo_map(project_path, opts)
         :ets.insert(@cache_table, {key, repo_map, now})
         repo_map

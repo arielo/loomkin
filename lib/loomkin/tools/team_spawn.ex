@@ -78,8 +78,10 @@ defmodule Loomkin.Tools.TeamSpawn do
        ) do
     require Logger
 
+    start_time = System.monotonic_time(:millisecond)
+
     Logger.info(
-      "[Kin:team_spawn] team=#{team_name} roles=#{inspect(roles)} parent=#{inspect(parent_team_id)}"
+      "[Kin:team_spawn] team_id=NOT_YET_ASSIGNED session_id=NOT_YET_SET purpose=\"#{purpose}\" roles_count=#{length(roles)} custom_roles_count=0 duration_ms=NOT_YET_MEASURED"
     )
 
     team_result =
@@ -97,6 +99,18 @@ defmodule Loomkin.Tools.TeamSpawn do
         {:error, "Failed to create team '#{team_name}': #{inspect(reason)}"}
 
       {:ok, team_id} ->
+        duration_ms = System.monotonic_time(:millisecond) - start_time
+
+        custom_roles_count =
+          Enum.count(roles, fn r ->
+            role = Map.get(r, :role) || Map.get(r, "role")
+            not (is_atom(role) and role in Role.built_in_roles())
+          end)
+
+        Logger.info(
+          "[Kin:team_spawn] team_id=#{team_id} session_id=#{session_id} purpose=\"#{purpose}\" roles_count=#{length(roles)} custom_roles_count=#{custom_roles_count} duration_ms=#{duration_ms}"
+        )
+
         do_spawn_agents(
           team_id,
           team_name,
@@ -136,12 +150,20 @@ defmodule Loomkin.Tools.TeamSpawn do
 
         case resolve_role(role) do
           {:built_in, role_atom} ->
+            Logger.debug(
+              "[Kin:role.resolution] input_role=\"#{role}\" resolved_role=#{inspect(role_atom)} is_custom=false fuzzy_match=false"
+            )
+
             case Manager.spawn_agent(team_id, name, role_atom, spawn_opts) do
               {:ok, _pid} -> {:ok, name, role_atom}
               {:error, reason} -> {:error, name, role_atom, inspect(reason)}
             end
 
           {:custom, role_desc} ->
+            Logger.debug(
+              "[Kin:role.resolution] input_role=\"#{role}\" resolved_role=\"#{role_desc}\" is_custom=true fuzzy_match=false"
+            )
+
             generate_opts = Role.fast_model_opts(session_id)
 
             case Role.generate(role_desc, generate_opts) do
@@ -158,7 +180,12 @@ defmodule Loomkin.Tools.TeamSpawn do
                   "Role.generate failed for '#{role_desc}': #{inspect(gen_reason)}, falling back"
                 )
 
-                fallback = fuzzy_match_role(role_desc) || :researcher
+                fuzzy_fallback = fuzzy_match_role(role_desc)
+                fallback = fuzzy_fallback || :researcher
+
+                Logger.debug(
+                  "[Kin:role.resolution] input_role=\"#{role}\" resolved_role=#{inspect(fallback)} is_custom=true fuzzy_match=#{not is_nil(fuzzy_fallback)}"
+                )
 
                 case Manager.spawn_agent(team_id, name, fallback, spawn_opts) do
                   {:ok, _pid} -> {:ok, name, fallback}
